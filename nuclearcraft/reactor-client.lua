@@ -47,6 +47,45 @@ local function n(value, decimals)
     return string.format("%." .. tostring(decimals or 2) .. "f", value)
 end
 
+local RADIATION_PREFIXES = {
+    { factor = 1e15, prefix = "P" },
+    { factor = 1e12, prefix = "T" },
+    { factor = 1e9, prefix = "G" },
+    { factor = 1e6, prefix = "M" },
+    { factor = 1e3, prefix = "k" },
+    { factor = 1, prefix = "" },
+    { factor = 1e-3, prefix = "m" },
+    { factor = 1e-6, prefix = "u" },
+    { factor = 1e-9, prefix = "n" },
+    { factor = 1e-12, prefix = "p" },
+    { factor = 1e-15, prefix = "f" }
+}
+
+local function formatRadiation(value)
+    if value == nil then return "-" end
+    if type(value) ~= "number" then return tostring(value) end
+    if value == 0 then return "0 Rads/t" end
+
+    local absolute = math.abs(value)
+    local selected = RADIATION_PREFIXES[#RADIATION_PREFIXES]
+    for _, unit in ipairs(RADIATION_PREFIXES) do
+        if absolute >= unit.factor then
+            selected = unit
+            break
+        end
+    end
+
+    local scaled = value / selected.factor
+    local decimals = 2
+    if math.abs(scaled) >= 100 then
+        decimals = 0
+    elseif math.abs(scaled) >= 10 then
+        decimals = 1
+    end
+
+    return string.format("%." .. decimals .. "f %sRads/t", scaled, selected.prefix)
+end
+
 local function newLines() return {} end
 local function add(lines, text, color) table.insert(lines, { text = tostring(text or ""), color = color or TEXT }) end
 local function blank(lines) add(lines, "") end
@@ -200,7 +239,7 @@ local function buildRadiation(r)
     local lines = newLines()
     header(lines, "RADIATION")
     add(lines, "--------------------------------", MUTED)
-    if r and r.level ~= nil then add(lines, "Chunk radiation: " .. n(r.level)) else add(lines,
+    if r and r.level ~= nil then add(lines, "Chunk radiation: " .. formatRadiation(r.level)) else add(lines,
             "Chunk radiation unavailable", WARN) end
     if r and r.error then add(lines, tostring(r.error), BAD) end
     return lines
@@ -257,7 +296,7 @@ local function drawDashboard(response, err)
     if r.counts then drawAt(22, 10,
             "Vessels " ..
             n(r.counts.vessels) .. " | Heaters " .. n(r.counts.heaters) .. " | Mods " .. n(r.counts.moderators)) end
-    drawAt(1, 11, "Radiation: " .. n(radiation and radiation.level))
+    drawAt(1, 11, "Radiation: " .. formatRadiation(radiation and radiation.level))
 
     local y = 13
     drawAt(1, y, "VESSELS", HEADER)
