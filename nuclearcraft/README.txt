@@ -7,6 +7,12 @@ Shared libraries
   request/response traffic.
 - OPPM installs the required libraries with each client or server package.
 
+geiger-server.lua / geiger-client.lua
+- Standalone Geiger counter monitor with no reactor dependency.
+- Uses Linked Cards / component.tunnel for the cross-dimensional link.
+- Displays chunk radiation in Rads/t with SI prefixes.
+- Client has a compact reading view and a live auto-refresh dashboard.
+
 reactor-server.lua / reactor-client.lua
 - Salt fission reactor + Geiger counter.
 - Uses Linked Cards / component.tunnel for the cross-dimensional link.
