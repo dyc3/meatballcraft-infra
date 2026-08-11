@@ -1,5 +1,7 @@
 # MeatballCraft OpenComputers packages
 
+This repo contains the code that my friends and I used for various automations during our playthrough.
+
 This repository is an [OpenPrograms Package Manager (OPPM)](https://ocdoc.cil.li/tutorial:program:oppm) package source for OpenComputers.
 
 ## Register the repository
