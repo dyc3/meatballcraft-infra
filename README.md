@@ -4,10 +4,10 @@ This repository is an [OpenPrograms Package Manager (OPPM)](https://ocdoc.cil.li
 
 ## Register the repository
 
-After this repository has been pushed to a public GitHub repository, register it on an OpenComputers machine with:
+Register this repository on an OpenComputers machine with:
 
 ```sh
-oppm register <github-owner>/<repository>
+oppm register dyc3/meatballcraft-infra
 ```
 
 OPPM requires the default branch to be named `master` and reads package definitions from [`programs.cfg`](programs.cfg) at the repository root.
