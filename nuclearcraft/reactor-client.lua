@@ -1,8 +1,6 @@
 local component = require("component")
-local event = require("event")
-local serialization = require("serialization")
-local keyboard = require("keyboard")
-local term = require("term")
+local rpc = require("nuclearcraft.rpc")
+local uiModule = require("nuclearcraft.ui")
 
 local PROTOCOL = "nc-monitor-v1"
 local TIMEOUT = 5
@@ -14,149 +12,23 @@ local gpu = component.gpu
 if not tunnel then error("No tunnel component found") end
 if not gpu then error("No GPU found") end
 
-local TEXT = 0xFFFFFF
-local MUTED = 0xAAAAAA
-local HEADER = 0x55FFFF
-local GOOD = 0x55FF55
-local WARN = 0xFFFF55
-local BAD = 0xFF5555
-local BG = 0x000000
+local endpoint = rpc.tunnel(tunnel, PROTOCOL, TIMEOUT)
+local request = endpoint.request
+local ui = uiModule.new(gpu)
 
-gpu.setBackground(BG)
-gpu.setForeground(TEXT)
+local TEXT = uiModule.TEXT
+local MUTED = uiModule.MUTED
+local HEADER = uiModule.HEADER
+local GOOD = uiModule.GOOD
+local WARN = uiModule.WARN
+local BAD = uiModule.BAD
 
-local function request(requestType)
-    tunnel.send(PROTOCOL, requestType)
-
-    while true do
-        local _, _, _, _, _, protocol, messageType, encoded = event.pull(TIMEOUT, "modem_message")
-        if not protocol then return nil, "Request timed out" end
-
-        if protocol == PROTOCOL and messageType == "response" then
-            local ok, response = pcall(serialization.unserialize, encoded)
-            if not ok then return nil, "Failed to decode response" end
-            return response
-        end
-    end
-end
-
-local function n(value, decimals)
-    if value == nil then return "-" end
-    if type(value) ~= "number" then return tostring(value) end
-    if value == math.floor(value) then return tostring(value) end
-    return string.format("%." .. tostring(decimals or 2) .. "f", value)
-end
-
-local RADIATION_PREFIXES = {
-    { factor = 1e15, prefix = "P" },
-    { factor = 1e12, prefix = "T" },
-    { factor = 1e9, prefix = "G" },
-    { factor = 1e6, prefix = "M" },
-    { factor = 1e3, prefix = "k" },
-    { factor = 1, prefix = "" },
-    { factor = 1e-3, prefix = "m" },
-    { factor = 1e-6, prefix = "u" },
-    { factor = 1e-9, prefix = "n" },
-    { factor = 1e-12, prefix = "p" },
-    { factor = 1e-15, prefix = "f" }
-}
-
-local function formatRadiation(value)
-    if value == nil then return "-" end
-    if type(value) ~= "number" then return tostring(value) end
-    if value == 0 then return "0 Rads/t" end
-
-    local absolute = math.abs(value)
-    local selected = RADIATION_PREFIXES[#RADIATION_PREFIXES]
-    for _, unit in ipairs(RADIATION_PREFIXES) do
-        if absolute >= unit.factor then
-            selected = unit
-            break
-        end
-    end
-
-    local scaled = value / selected.factor
-    local decimals = 2
-    if math.abs(scaled) >= 100 then
-        decimals = 0
-    elseif math.abs(scaled) >= 10 then
-        decimals = 1
-    end
-
-    return string.format("%." .. decimals .. "f %sRads/t", scaled, selected.prefix)
-end
-
-local function newLines() return {} end
-local function add(lines, text, color) table.insert(lines, { text = tostring(text or ""), color = color or TEXT }) end
-local function blank(lines) add(lines, "") end
-local function header(lines, text) add(lines, text, HEADER) end
-
-local function viewer(lines)
-    local width, height = gpu.getResolution()
-    local pageHeight = height - 1
-    local offset = 1
-
-    local function maxOffset() return math.max(1, #lines - pageHeight + 1) end
-    local function clamp() offset = math.max(1, math.min(offset, maxOffset())) end
-
-    local function render()
-        gpu.setBackground(BG)
-        gpu.fill(1, 1, width, height, " ")
-
-        for row = 1, pageHeight do
-            local line = lines[offset + row - 1]
-            if line then
-                gpu.setForeground(line.color)
-                gpu.set(1, row, line.text:sub(1, width))
-            end
-        end
-
-        gpu.setForeground(MUTED)
-        local footer = string.format(
-            "Up/Down PgUp/PgDn Home/End q=back [%d-%d/%d]",
-            offset,
-            math.min(offset + pageHeight - 1, #lines),
-            #lines
-        )
-        gpu.set(1, height, footer:sub(1, width))
-    end
-
-    render()
-
-    while true do
-        local e = table.pack(event.pull())
-
-        if e[1] == "key_down" then
-            local char = e[3]
-            local code = e[4]
-
-            if char == string.byte("q") or char == string.byte("Q") then
-                break
-            elseif code == keyboard.keys.up then
-                offset = offset - 1
-            elseif code == keyboard.keys.down then
-                offset = offset + 1
-            elseif code == keyboard.keys.pageUp then
-                offset = offset - pageHeight
-            elseif code == keyboard.keys.pageDown then
-                offset = offset + pageHeight
-            elseif code == keyboard.keys.home then
-                offset = 1
-            elseif code == keyboard.keys["end"] then
-                offset = maxOffset()
-            end
-
-            clamp()
-            render()
-        elseif e[1] == "scroll" then
-            if e[5] > 0 then offset = offset - 3 else offset = offset + 3 end
-            clamp()
-            render()
-        end
-    end
-
-    term.clear()
-end
+local n = uiModule.number
+local function formatRadiation(value) return uiModule.metric(value, "Rads/t") end
+local newLines = ui.newLines
+local add = ui.add
+local blank = ui.blank
+local header = ui.header
 
 local function buildReactorSummary(r)
     local lines = newLines()
@@ -245,17 +117,10 @@ local function buildRadiation(r)
     return lines
 end
 
-local function drawAt(x, y, text, color)
-    local width, height = gpu.getResolution()
-    if y < 1 or y > height or x > width then return end
-    gpu.setForeground(color or TEXT)
-    gpu.set(x, y, tostring(text):sub(1, width - x + 1))
-end
+local drawAt = ui.draw
 
 local function drawDashboard(response, err)
-    local width, height = gpu.getResolution()
-    gpu.setBackground(BG)
-    gpu.fill(1, 1, width, height, " ")
+    local width, height = ui.clear()
 
     drawAt(1, 1, "NC REACTOR DASHBOARD", HEADER)
     if err then
@@ -326,72 +191,22 @@ local function drawDashboard(response, err)
 end
 
 local function dashboard()
-    local response = nil
-    local lastError = nil
-    local refresh = true
-
-    while true do
-        if refresh then
-            local newResponse, err = request("getAll")
-            if newResponse and newResponse.ok then
-                response = newResponse; lastError = nil
-            else
-                lastError = err or (newResponse and newResponse.error) or "Unknown error"
-            end
-            drawDashboard(response, lastError)
-            refresh = false
-        end
-
-        local e = table.pack(event.pull(REFRESH_INTERVAL, "key_down"))
-        if not e[1] then
-            refresh = true
-        else
-            local char = e[3]
-            if char == string.byte("q") or char == string.byte("Q") then
-                term.clear(); return
-            elseif char == string.byte("r") or char == string.byte("R") then
-                refresh = true
-            end
-        end
-    end
+    ui.runDashboard(REFRESH_INTERVAL, function() return request("getAll") end, drawDashboard)
 end
 
 local function showResponse(requestType, builder, field)
-    local response, err = request(requestType)
-    if not response then
-        print("ERROR: " .. tostring(err)); os.sleep(1); return
-    end
-    if not response.ok then
-        print("Server error: " .. tostring(response.error)); os.sleep(1); return
-    end
-    viewer(builder(response[field]))
+    ui.showResponse(request, requestType, builder, field)
 end
 
-while true do
-    term.clear()
-    gpu.setForeground(HEADER)
-    print("NC Reactor Monitor")
-    gpu.setForeground(MUTED)
-    print("==================")
-    gpu.setForeground(TEXT)
-    print("1. Reactor summary")
-    print("2. Vessel stats")
-    print("3. Radiation")
-    print("4. Live dashboard")
-    print("q. Quit")
-    print()
-    io.write("> ")
-
-    local choice = io.read()
-    if choice == "1" then
+ui.runMenu("NC Reactor Monitor", {
+    { key = "1", label = "Reactor summary", action = function()
         showResponse("getReactor", buildReactorSummary, "reactor")
-    elseif choice == "2" then
+    end },
+    { key = "2", label = "Vessel stats", action = function()
         showResponse("getVessels", buildVessels, "vessels")
-    elseif choice == "3" then
+    end },
+    { key = "3", label = "Radiation", action = function()
         showResponse("getRadiation", buildRadiation, "radiation")
-    elseif choice == "4" then
-        dashboard()
-    elseif choice == "q" or choice == "quit" or choice == "exit" then
-        term.clear(); break
-    end
-end
+    end },
+    { key = "4", label = "Live dashboard", action = dashboard }
+})

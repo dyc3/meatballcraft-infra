@@ -1,8 +1,6 @@
 local component = require("component")
-local event = require("event")
-local serialization = require("serialization")
-local keyboard = require("keyboard")
-local term = require("term")
+local rpc = require("nuclearcraft.rpc")
+local uiModule = require("nuclearcraft.ui")
 
 local PORT = 48722
 local PROTOCOL = "nc-heat-exchanger-v1"
@@ -16,111 +14,23 @@ local modem = component.modem
 local gpu = component.gpu
 modem.open(PORT)
 
-local BG = 0x000000
-local TEXT = 0xFFFFFF
-local MUTED = 0xAAAAAA
-local HEADER = 0x55FFFF
-local GOOD = 0x55FF55
-local WARN = 0xFFFF55
-local BAD = 0xFF5555
+local endpoint = rpc.modem(modem, PORT, PROTOCOL, TIMEOUT)
+local request = endpoint.request
+local ui = uiModule.new(gpu)
 
-gpu.setBackground(BG)
-gpu.setForeground(TEXT)
+local MUTED = uiModule.MUTED
+local HEADER = uiModule.HEADER
+local GOOD = uiModule.GOOD
+local WARN = uiModule.WARN
+local BAD = uiModule.BAD
 
-local function request(requestType)
-    modem.broadcast(PORT, PROTOCOL, requestType)
-
-    while true do
-        local _, _, remoteAddress, port, _, protocol, messageType, encoded = event.pull(TIMEOUT, "modem_message")
-        if not remoteAddress then return nil, "Request timed out" end
-
-        if port == PORT and protocol == PROTOCOL and messageType == "response" then
-            local ok, response = pcall(serialization.unserialize, encoded)
-            if not ok then return nil, "Invalid response" end
-            return response
-        end
-    end
-end
-
-local function n(value, decimals)
-    if value == nil then return "-" end
-    if type(value) ~= "number" then return tostring(value) end
-    if value == math.floor(value) then return tostring(value) end
-    return string.format("%." .. tostring(decimals or 2) .. "f", value)
-end
-
-local function pct(value)
-    if type(value) ~= "number" then return "-" end
-    return string.format("%.1f%%", value)
-end
-
-local function pos(p)
-    if not p then return "?,?,?" end
-    return string.format("%s,%s,%s", tostring(p.x or "?"), tostring(p.y or "?"), tostring(p.z or "?"))
-end
-
-local function newLines() return {} end
-local function add(lines, text, color) table.insert(lines, { text = tostring(text or ""), color = color or TEXT }) end
-local function blank(lines) add(lines, "") end
-local function header(lines, text) add(lines, text, HEADER) end
-
-local function viewer(lines)
-    local width, height = gpu.getResolution()
-    local pageHeight = height - 1
-    local offset = 1
-
-    local function maxOffset() return math.max(1, #lines - pageHeight + 1) end
-    local function clamp() offset = math.max(1, math.min(offset, maxOffset())) end
-
-    local function render()
-        gpu.setBackground(BG)
-        gpu.fill(1, 1, width, height, " ")
-
-        for row = 1, pageHeight do
-            local line = lines[offset + row - 1]
-            if line then
-                gpu.setForeground(line.color)
-                gpu.set(1, row, line.text:sub(1, width))
-            end
-        end
-
-        gpu.setForeground(MUTED)
-        local footer = string.format("Up/Down PgUp/PgDn Home/End q=back [%d-%d/%d]", offset,
-            math.min(offset + pageHeight - 1, #lines), #lines)
-        gpu.set(1, height, footer:sub(1, width))
-    end
-
-    render()
-
-    while true do
-        local e = table.pack(event.pull())
-        if e[1] == "key_down" then
-            local char = e[3]
-            local code = e[4]
-            if char == string.byte("q") or char == string.byte("Q") then
-                break
-            elseif code == keyboard.keys.up then
-                offset = offset - 1
-            elseif code == keyboard.keys.down then
-                offset = offset + 1
-            elseif code == keyboard.keys.pageUp then
-                offset = offset - pageHeight
-            elseif code == keyboard.keys.pageDown then
-                offset = offset + pageHeight
-            elseif code == keyboard.keys.home then
-                offset = 1
-            elseif code == keyboard.keys["end"] then
-                offset = maxOffset()
-            end
-            clamp(); render()
-        elseif e[1] == "scroll" then
-            if e[5] > 0 then offset = offset - 3 else offset = offset + 3 end
-            clamp(); render()
-        end
-    end
-
-    term.clear()
-end
+local n = uiModule.number
+local pct = uiModule.percentage
+local pos = uiModule.position
+local newLines = ui.newLines
+local add = ui.add
+local blank = ui.blank
+local header = ui.header
 
 local function buildSummary(e)
     local lines = newLines()
@@ -191,17 +101,10 @@ local function buildCondensationTubes(tubes)
     return lines
 end
 
-local function drawAt(x, y, text, color)
-    local width, height = gpu.getResolution()
-    if y < 1 or y > height or x > width then return end
-    gpu.setForeground(color or TEXT)
-    gpu.set(x, y, tostring(text):sub(1, width - x + 1))
-end
+local drawAt = ui.draw
 
 local function drawDashboard(response, err)
-    local width, height = gpu.getResolution()
-    gpu.setBackground(BG)
-    gpu.fill(1, 1, width, height, " ")
+    local width, height = ui.clear()
 
     drawAt(1, 1, "HEAT EXCHANGER DASHBOARD", HEADER)
     if err then
@@ -264,72 +167,18 @@ local function drawDashboard(response, err)
 end
 
 local function dashboard()
-    local response = nil
-    local lastError = nil
-    local refresh = true
-
-    while true do
-        if refresh then
-            local newResponse, err = request("getAll")
-            if newResponse and newResponse.ok then
-                response = newResponse; lastError = nil
-            else
-                lastError = err or (newResponse and newResponse.error) or "Unknown error"
-            end
-            drawDashboard(response, lastError)
-            refresh = false
-        end
-
-        local e = table.pack(event.pull(REFRESH_INTERVAL, "key_down"))
-        if not e[1] then
-            refresh = true
-        else
-            local char = e[3]
-            if char == string.byte("q") or char == string.byte("Q") then
-                term.clear(); return
-            elseif char == string.byte("r") or char == string.byte("R") then
-                refresh = true
-            end
-        end
-    end
+    ui.runDashboard(REFRESH_INTERVAL, function() return request("getAll") end, drawDashboard)
 end
 
-while true do
-    term.clear()
-    gpu.setForeground(HEADER)
-    print("NC Heat Exchanger")
-    gpu.setForeground(MUTED)
-    print("=================")
-    gpu.setForeground(TEXT)
-    print("1. Summary")
-    print("2. Exchanger tubes")
-    print("3. Condensation tubes")
-    print("4. Live dashboard")
-    print("q. Quit")
-    print()
-    io.write("> ")
-
-    local choice = io.read()
-
-    if choice == "1" then
-        local response, err = request("getSummary")
-        if response and response.ok then viewer(buildSummary(response.exchanger)) else
-            print("ERROR: " .. tostring(err or (response and response.error))); os.sleep(1)
-        end
-    elseif choice == "2" then
-        local response, err = request("getExchangerTubes")
-        if response and response.ok then viewer(buildExchangerTubes(response.tubes)) else
-            print("ERROR: " .. tostring(err or (response and response.error))); os.sleep(1)
-        end
-    elseif choice == "3" then
-        local response, err = request("getCondensationTubes")
-        if response and response.ok then viewer(buildCondensationTubes(response.tubes)) else
-            print("ERROR: " .. tostring(err or (response and response.error))); os.sleep(1)
-        end
-    elseif choice == "4" then
-        dashboard()
-    elseif choice == "q" or choice == "quit" or choice == "exit" then
-        term.clear()
-        break
-    end
-end
+ui.runMenu("NC Heat Exchanger", {
+    { key = "1", label = "Summary", action = function()
+        ui.showResponse(request, "getSummary", buildSummary, "exchanger")
+    end },
+    { key = "2", label = "Exchanger tubes", action = function()
+        ui.showResponse(request, "getExchangerTubes", buildExchangerTubes, "tubes")
+    end },
+    { key = "3", label = "Condensation tubes", action = function()
+        ui.showResponse(request, "getCondensationTubes", buildCondensationTubes, "tubes")
+    end },
+    { key = "4", label = "Live dashboard", action = dashboard }
+})

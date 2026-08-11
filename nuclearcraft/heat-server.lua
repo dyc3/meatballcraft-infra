@@ -1,6 +1,5 @@
 local component = require("component")
-local event = require("event")
-local serialization = require("serialization")
+local rpc = require("nuclearcraft.rpc")
 
 local PORT = 48722
 local PROTOCOL = "nc-heat-exchanger-v1"
@@ -11,6 +10,8 @@ if not component.isAvailable("nc_heat_exchanger") then error("No nc_heat_exchang
 local modem = component.modem
 local exchanger = component.nc_heat_exchanger
 modem.open(PORT)
+
+local endpoint = rpc.modem(modem, PORT, PROTOCOL)
 
 local function safeCall(fn)
     local ok, value = pcall(fn)
@@ -146,10 +147,4 @@ print("========================")
 print("Port: " .. PORT)
 print("Listening...")
 
-while true do
-    local _, _, remoteAddress, port, _, protocol, requestType = event.pull("modem_message")
-    if port == PORT and protocol == PROTOCOL then
-        local response = buildResponse(requestType)
-        modem.send(remoteAddress, PORT, PROTOCOL, "response", serialization.serialize(response))
-    end
-end
+endpoint.serve(buildResponse)

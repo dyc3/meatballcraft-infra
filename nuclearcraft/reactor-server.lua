@@ -1,6 +1,5 @@
 local component = require("component")
-local event = require("event")
-local serialization = require("serialization")
+local rpc = require("nuclearcraft.rpc")
 
 local PROTOCOL = "nc-monitor-v1"
 
@@ -11,6 +10,8 @@ local geiger = component.nc_geiger_counter
 if not tunnel then error("No tunnel component found") end
 if not reactor then error("No nc_salt_fission_reactor found") end
 if not geiger then error("No nc_geiger_counter found") end
+
+local endpoint = rpc.tunnel(tunnel, PROTOCOL)
 
 local function safeCall(fn)
     local ok, value = pcall(fn)
@@ -124,10 +125,4 @@ end
 print("Listening on linked card...")
 print()
 
-while true do
-    local _, _, _, _, _, protocol, requestType = event.pull("modem_message")
-    if protocol == PROTOCOL then
-        local response = buildResponse(requestType)
-        tunnel.send(PROTOCOL, "response", serialization.serialize(response))
-    end
-end
+endpoint.serve(buildResponse)
