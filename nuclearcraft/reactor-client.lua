@@ -7,14 +7,22 @@ local PROTOCOL = "nc-reactor-v1"
 local TIMEOUT = 5
 local REFRESH_INTERVAL = 2
 
-if not component.isAvailable("modem") then error("No Network Card found (missing 'modem' component)") end
 if not component.isAvailable("gpu") then error("No GPU found") end
 
-local modem = component.modem
 local gpu = component.gpu
-modem.open(PORT)
+local endpoint
 
-local endpoint = rpc.modem(modem, PORT, PROTOCOL, TIMEOUT)
+if component.isAvailable("tunnel") then
+    endpoint = rpc.tunnel(component.tunnel, PROTOCOL, TIMEOUT)
+else
+    if not component.isAvailable("modem") then
+        error("No Linked Card or Network Card found (missing 'tunnel' and 'modem' components)")
+    end
+    local modem = component.modem
+    modem.open(PORT)
+    endpoint = rpc.modem(modem, PORT, PROTOCOL, TIMEOUT)
+end
+
 local request = endpoint.request
 local ui = uiModule.new(gpu)
 

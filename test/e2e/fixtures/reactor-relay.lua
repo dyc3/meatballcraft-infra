@@ -72,3 +72,55 @@ assert(networkResponse.port == PORT and networkResponse.protocol == PROTOCOL, "r
 assert(networkResponse.messageType == "response", "relay did not send an RPC response")
 assert(networkResponse.value.ok == true, "relay did not preserve the server response")
 assert(networkResponse.value.reactor.reactorOn == true, "relay response lost reactor data")
+
+local CLIENT_COMPLETE = "reactor client transport selected"
+
+local function testClientTransport(hasTunnel)
+    local selected
+    local clientPort
+    local clientModem = {
+        open = function(port)
+            clientPort = port
+            return true
+        end
+    }
+
+    package.loaded.component = {
+        gpu = {},
+        modem = clientModem,
+        tunnel = hasTunnel and {} or nil,
+        isAvailable = function(name)
+            return name == "gpu" or name == "modem" or (name == "tunnel" and hasTunnel)
+        end
+    }
+    package.loaded["nuclearcraft.rpc"] = {
+        tunnel = function(_, protocol, timeout)
+            selected = { kind = "tunnel", protocol = protocol, timeout = timeout }
+            return { request = function() end }
+        end,
+        modem = function(_, port, protocol, timeout)
+            selected = { kind = "modem", port = port, protocol = protocol, timeout = timeout }
+            return { request = function() end }
+        end
+    }
+    package.loaded["nuclearcraft.ui"] = {
+        new = function()
+            return { runMenu = function() error(CLIENT_COMPLETE) end }
+        end
+    }
+
+    local ran, clientFailure = pcall(dofile, mount .. "/repo/nuclearcraft/reactor-client.lua")
+    assert(not ran and tostring(clientFailure):find(CLIENT_COMPLETE, 1, true), tostring(clientFailure))
+    assert(selected and selected.protocol == PROTOCOL and selected.timeout == 5, "client used the wrong RPC endpoint")
+
+    if hasTunnel then
+        assert(selected.kind == "tunnel", "client did not prefer its Linked Card")
+        assert(clientPort == nil, "client opened the modem while using its Linked Card")
+    else
+        assert(selected.kind == "modem", "client did not fall back to the reactor relay")
+        assert(selected.port == PORT and clientPort == PORT, "client used the wrong reactor relay port")
+    end
+end
+
+testClientTransport(true)
+testClientTransport(false)

@@ -17,6 +17,7 @@ reactor-server.lua / reactor-relay.lua / reactor-client.lua
 - Salt fission reactor + Geiger counter.
 - The server uses a Linked Card for the cross-dimensional link to the relay.
 - The relay serves clients over normal Network Cards / component.modem.
+- The client prefers a direct Linked Card connection and falls back to the relay over a Network Card.
 - Port: 48723
 - Reactor server normalizes NuclearCraft 2.19a getVesselStats() data.
 - Client has compact scrollable views and a live auto-refresh dashboard.
