@@ -59,3 +59,19 @@ Run any repository-relative Lua program that terminates on its own:
 ```
 
 The runner provides a tier-three CPU, memory, GPU, screen, keyboard, the Lua BIOS, OpenOS, and a writable disk. Programs needing mod-specific components or user input need a purpose-built fixture before they can complete unattended.
+
+## Provision server drives
+
+Install the drive provisioner on an OpenOS computer where OPPM is already configured with this repository:
+
+```sh
+oppm install provision-drive
+```
+
+Attach the OpenOS installation disk and a new server drive, then run:
+
+```sh
+provision-drive
+```
+
+Pick the target from the displayed writable drives and approve the destructive operation once. The tool erases the target, then uses the standard `install` command for both OpenOS and OPPM against that exact filesystem address without further keyboard input. If the OPPM disk is not already attached, it waits automatically while you swap installation media. It then installs fresh OPPM package state plus the `dyc3/meatballcraft-infra` repository registration. OPPM's installer requires an Internet Card. A target label or address can also be supplied directly; `--yes` skips the initial approval.

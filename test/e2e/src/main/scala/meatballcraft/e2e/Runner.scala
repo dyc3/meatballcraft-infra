@@ -1,7 +1,7 @@
 package meatballcraft.e2e
 
 import totoro.ocelot.brain.Ocelot
-import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, Keyboard, Memory, Screen}
+import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, InternetCard, Keyboard, Memory, Screen}
 import totoro.ocelot.brain.event.{EventBus, MachineCrashEvent}
 import totoro.ocelot.brain.loot.Loot
 import totoro.ocelot.brain.util.{ExtendedTier, Tier}
@@ -33,19 +33,37 @@ object Runner {
 
     var initialized = false
     try {
+      if (requestedProgram == "test/e2e/fixtures/provision-drive.lua") {
+        copyTree(
+          root.resolve("test/ocelot-brain/src/main/resources/assets/opencomputers/loot/openos"),
+          diskRoot
+        )
+        Files.deleteIfExists(diskRoot.resolve(".prop"))
+        Files.writeString(
+          diskRoot.resolve("etc/oppm.cfg"),
+          "{path='/usr',repos={}}\n",
+          StandardCharsets.UTF_8
+        )
+        Files.writeString(
+          diskRoot.resolve("etc/opdata.svd"),
+          "{_repos={['dyc3/meatballcraft-infra']={repo='dyc3/meatballcraft-infra'}}," +
+            "oppm={['existing']='/usr/bin/oppm.lua'}}\n",
+          StandardCharsets.UTF_8
+        )
+      }
       stageRepository(root, diskRoot)
       writeAutorun(diskRoot, root.relativize(program).toString.replace('\\', '/'))
 
       Ocelot.initialize()
       initialized = true
-      runComputer(workspaceRoot, diskRoot, requestedProgram)
+      runComputer(root, workspaceRoot, diskRoot, requestedProgram)
     } finally {
       if (initialized) Ocelot.shutdown()
       deleteTree(temporaryRoot)
     }
   }
 
-  private def runComputer(workspaceRoot: Path, diskRoot: Path, program: String): Unit = {
+  private def runComputer(root: Path, workspaceRoot: Path, diskRoot: Path, program: String): Unit = {
     val workspace = new Workspace(workspaceRoot)
     val computer = workspace.add(new Case(Tier.Creative))
     val screen = workspace.add(new Screen(Tier.Three))
@@ -54,13 +72,67 @@ object Runner {
     computer.inventory(0) = new CPU(Tier.Three)
     computer.inventory(1) = new GraphicsCard(Tier.Three)
     computer.inventory(2) = new Memory(ExtendedTier.ThreeHalf)
-    computer.inventory(3) = Loot.LuaBiosEEPROM.create()
+    val eeprom = Loot.LuaBiosEEPROM.create()
+    computer.inventory(3) = eeprom
     computer.inventory(4) = Loot.OpenOsFloppy.create()
 
     val testDisk = new HDDManaged(Tier.Three)
     testDisk.customRealPath = Some(diskRoot)
     testDisk.fileSystem.label.setLabel("e2e")
     computer.inventory(5) = testDisk
+
+    if (program == "test/e2e/fixtures/provision-drive.lua") {
+      val oppmRoot = workspaceRoot.resolve("oppm-fixture")
+      Files.createDirectories(oppmRoot.resolve("usr/bin"))
+      Files.writeString(oppmRoot.resolve(".prop"), "{label='OPPM', reboot=false}\n", StandardCharsets.UTF_8)
+      Files.writeString(
+        oppmRoot.resolve(".install"),
+        "local fs = require('filesystem')\n" +
+          "local serialization = require('serialization')\n" +
+          "local stateFile = assert(io.open('/etc/opdata.svd', 'r'))\n" +
+          "local state = serialization.unserialize(stateFile:read('*a'))\n" +
+          "stateFile:close()\n" +
+          "if state.oppm then print('Package has already been installed') return false end\n" +
+          "local to = install.to:gsub('//', '/')\n" +
+          "if not fs.isDirectory(to .. 'usr/bin') then fs.makeDirectory(to .. 'usr/bin') end\n" +
+          "local source = assert(io.open(install.from:gsub('//', '/') .. 'usr/bin/oppm.lua', 'r'))\n" +
+          "local data = source:read('*a')\n" +
+          "source:close()\n" +
+          "data = data:gsub('if options%.iKnowWhatIAmDoing then', 'if true then', 1)\n" +
+          "data = data:gsub('io%.stderr:write%(\"Please install oppm by running /bin/install%.lua\"%)', 'return')\n" +
+          "local output, reason = io.open(to .. 'usr/bin/oppm.lua', 'w')\n" +
+          "assert(output, reason)\n" +
+          "output:write(data)\n" +
+          "output:close()\n" +
+          "state.oppm = {fixture = to .. 'usr/bin/oppm.lua'}\n" +
+          "stateFile = assert(io.open('/etc/opdata.svd', 'w'))\n" +
+          "stateFile:write(serialization.serialize(state))\n" +
+          "stateFile:close()\n" +
+          "return true\n",
+        StandardCharsets.UTF_8
+      )
+      Files.copy(
+        root.resolve("test/ocelot-brain/src/main/resources/assets/opencomputers/loot/oppm/usr/bin/oppm.lua"),
+        oppmRoot.resolve("usr/bin/oppm.lua")
+      )
+
+      val oppmDisk = new HDDManaged(Tier.One)
+      oppmDisk.customRealPath = Some(oppmRoot)
+      oppmDisk.fileSystem.label.setLabel("oppm")
+      computer.inventory(6) = oppmDisk
+
+      val targetRoot = workspaceRoot.resolve("provision-target")
+      Files.createDirectories(targetRoot.resolve("etc"))
+      Files.writeString(targetRoot.resolve("stale-file"), "must be erased\n", StandardCharsets.UTF_8)
+      Files.writeString(targetRoot.resolve("etc/opdata.svd"), "{oppm={stale='record'}}\n", StandardCharsets.UTF_8)
+      val targetDisk = new HDDManaged(Tier.Three)
+      targetDisk.customRealPath = Some(targetRoot)
+      targetDisk.fileSystem.label.setLabel("provision-target")
+      computer.inventory(7) = targetDisk
+      computer.inventory(8) = new InternetCard()
+
+      eeprom.volatileData = testDisk.node.address.getBytes(StandardCharsets.UTF_8)
+    }
 
     computer.connect(screen)
     screen.connect(keyboard)
