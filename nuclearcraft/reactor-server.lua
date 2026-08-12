@@ -1,7 +1,7 @@
 local component = require("component")
 local rpc = require("nuclearcraft.rpc")
 
-local PROTOCOL = "nc-monitor-v1"
+local PROTOCOL = "nc-reactor-v1"
 
 local tunnel = component.tunnel
 local reactor = component.nc_salt_fission_reactor
@@ -117,12 +117,12 @@ local function buildResponse(requestType)
     end
 end
 
-print("NC monitor server")
+print("NC reactor server")
 print("=================")
 if not geiger then
     print("WARNING: No nc_geiger_counter found; radiation data will be unavailable.")
 end
-print("Listening on linked card...")
+print("Listening for reactor relay on linked card...")
 print()
 
 endpoint.serve(buildResponse)

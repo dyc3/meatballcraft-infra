@@ -2,17 +2,19 @@ local component = require("component")
 local rpc = require("nuclearcraft.rpc")
 local uiModule = require("nuclearcraft.ui")
 
-local PROTOCOL = "nc-monitor-v1"
+local PORT = 48723
+local PROTOCOL = "nc-reactor-v1"
 local TIMEOUT = 5
 local REFRESH_INTERVAL = 2
 
-local tunnel = component.tunnel
+if not component.isAvailable("modem") then error("No Network Card found (missing 'modem' component)") end
+if not component.isAvailable("gpu") then error("No GPU found") end
+
+local modem = component.modem
 local gpu = component.gpu
+modem.open(PORT)
 
-if not tunnel then error("No tunnel component found") end
-if not gpu then error("No GPU found") end
-
-local endpoint = rpc.tunnel(tunnel, PROTOCOL, TIMEOUT)
+local endpoint = rpc.modem(modem, PORT, PROTOCOL, TIMEOUT)
 local request = endpoint.request
 local ui = uiModule.new(gpu)
 
