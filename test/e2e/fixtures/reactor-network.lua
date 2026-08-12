@@ -1,0 +1,2 @@
+-- Runner marker for the real three-computer reactor topology fixture.
+-- The runner boots nuclearcraft/reactor-client.lua itself and drives its UI.

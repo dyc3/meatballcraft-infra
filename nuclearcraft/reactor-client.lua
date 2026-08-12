@@ -1,16 +1,26 @@
 local component = require("component")
+local discovery = require("meatball.discovery")
 local rpc = require("nuclearcraft.rpc")
+local serviceSelector = require("nuclearcraft.service")
+local shell = require("shell")
 local uiModule = require("nuclearcraft.ui")
 
 local PORT = 48723
 local PROTOCOL = "nc-reactor-v1"
 local TIMEOUT = 5
 local REFRESH_INTERVAL = 2
+local SERVICE_TYPE = "meatballcraft.nc.reactor"
+local API_VERSION = 1
+local DISCOVERY_TIMEOUT = 1
+local CONFIG_PATH = "/etc/nuclearcraft/reactor-client.cfg"
+
+local _, options = shell.parse(...)
 
 if not component.isAvailable("gpu") then error("No GPU found") end
 
 local gpu = component.gpu
 local endpoint
+local selectedService
 
 if component.isAvailable("tunnel") then
     endpoint = rpc.tunnel(component.tunnel, PROTOCOL, TIMEOUT)
@@ -19,8 +29,21 @@ else
         error("No Linked Card or Network Card found (missing 'tunnel' and 'modem' components)")
     end
     local modem = component.modem
-    modem.open(PORT)
-    endpoint = rpc.modem(modem, PORT, PROTOCOL, TIMEOUT)
+    local services, findError = discovery.find(modem, {
+        serviceType = SERVICE_TYPE,
+        apiVersion = API_VERSION,
+        timeout = DISCOVERY_TIMEOUT
+    })
+    if not services then error("Could not discover reactor relays: " .. tostring(findError)) end
+
+    selectedService = serviceSelector.choose(services, {
+        requested = options.reactor,
+        configPath = CONFIG_PATH,
+        label = "reactor relay",
+        title = "Reactor relays"
+    })
+    modem.open(selectedService.servicePort)
+    endpoint = rpc.modemUnicast(modem, selectedService.address, selectedService.servicePort, PROTOCOL, TIMEOUT)
 end
 
 local request = endpoint.request
@@ -208,7 +231,10 @@ local function showResponse(requestType, builder, field)
     ui.showResponse(request, requestType, builder, field)
 end
 
-ui.runMenu("NC Reactor Monitor", {
+local menuTitle = "NC Reactor Monitor"
+if selectedService then menuTitle = menuTitle .. " - " .. selectedService.displayName end
+
+ui.runMenu(menuTitle, {
     { key = "1", label = "Reactor summary", action = function()
         showResponse("getReactor", buildReactorSummary, "reactor")
     end },

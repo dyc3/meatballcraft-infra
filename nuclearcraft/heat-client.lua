@@ -1,20 +1,41 @@
 local component = require("component")
+local discovery = require("meatball.discovery")
 local rpc = require("nuclearcraft.rpc")
+local serviceSelector = require("nuclearcraft.service")
+local shell = require("shell")
 local uiModule = require("nuclearcraft.ui")
 
-local PORT = 48722
 local PROTOCOL = "nc-heat-exchanger-v1"
 local TIMEOUT = 5
 local REFRESH_INTERVAL = 2
+local SERVICE_TYPE = "meatballcraft.nc.heat-exchanger"
+local API_VERSION = 1
+local DISCOVERY_TIMEOUT = 1
+local CONFIG_PATH = "/etc/nuclearcraft/heat-client.cfg"
+
+local _, options = shell.parse(...)
 
 if not component.isAvailable("modem") then error("No Network Card found (missing 'modem' component)") end
 if not component.isAvailable("gpu") then error("No GPU found") end
 
 local modem = component.modem
 local gpu = component.gpu
-modem.open(PORT)
+local services, findError = discovery.find(modem, {
+    serviceType = SERVICE_TYPE,
+    apiVersion = API_VERSION,
+    timeout = DISCOVERY_TIMEOUT
+})
+if not services then error("Could not discover heat exchangers: " .. tostring(findError)) end
 
-local endpoint = rpc.modem(modem, PORT, PROTOCOL, TIMEOUT)
+local selectedService = serviceSelector.choose(services, {
+    requested = options.exchanger,
+    configPath = CONFIG_PATH,
+    label = "heat exchanger",
+    title = "Heat exchangers"
+})
+modem.open(selectedService.servicePort)
+
+local endpoint = rpc.modemUnicast(modem, selectedService.address, selectedService.servicePort, PROTOCOL, TIMEOUT)
 local request = endpoint.request
 local ui = uiModule.new(gpu)
 
@@ -170,7 +191,7 @@ local function dashboard()
     ui.runDashboard(REFRESH_INTERVAL, function() return request("getAll") end, drawDashboard)
 end
 
-ui.runMenu("NC Heat Exchanger", {
+ui.runMenu("NC Heat Exchanger - " .. selectedService.displayName, {
     { key = "1", label = "Summary", action = function()
         ui.showResponse(request, "getSummary", buildSummary, "exchanger")
     end },

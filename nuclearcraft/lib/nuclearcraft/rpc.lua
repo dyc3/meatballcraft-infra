@@ -1,25 +1,83 @@
 local event = require("event")
+local computer = require("computer")
 local serialization = require("serialization")
 
 local rpc = {}
+local requestCounter = 0
+
+local function nextRequestId(protocol)
+    requestCounter = requestCounter + 1
+    return table.concat({ tostring(protocol), tostring(computer.uptime()), tostring(requestCounter) }, ":")
+end
 
 local function decode(encoded)
     local ok, response = pcall(serialization.unserialize, encoded)
-    if not ok then return nil, "Invalid response" end
+    if not ok or response == nil then return nil, "Invalid response" end
     return response
+end
+
+local function remaining(deadline)
+    return math.max(0, deadline - computer.uptime())
 end
 
 function rpc.tunnel(tunnel, protocol, timeout)
     local endpoint = {}
 
     function endpoint.request(requestType)
-        tunnel.send(protocol, requestType)
+        local requestId = nextRequestId(protocol)
+        local deadline = computer.uptime() + (timeout or 5)
+        tunnel.send(protocol, "request", requestId, requestType)
 
         while true do
-            local _, _, _, _, _, receivedProtocol, messageType, encoded = event.pull(timeout, "modem_message")
+            local _, _, _, _, _, receivedProtocol, messageType, receivedRequestId, encoded =
+                event.pull(remaining(deadline), "modem_message")
             if not receivedProtocol then return nil, "Request timed out" end
 
             if receivedProtocol == protocol and messageType == "response" then
+                if receivedRequestId == requestId then return decode(encoded) end
+                if encoded == nil and type(receivedRequestId) == "string" then
+                    return nil, "Incompatible RPC peer; update and reboot both endpoints"
+                end
+            end
+        end
+    end
+
+    function endpoint.serve(handler)
+        while true do
+            local _, _, _, _, _, receivedProtocol, messageType, requestId, requestType = event.pull("modem_message")
+            if receivedProtocol == protocol then
+                if messageType == "request" then
+                    tunnel.send(protocol, "response", requestId, serialization.serialize(handler(requestType)))
+                else
+                    -- Compatibility with uncorrelated clients from before RPC used request IDs.
+                    tunnel.send(protocol, "response", serialization.serialize(handler(messageType)))
+                end
+            end
+        end
+    end
+
+    return endpoint
+end
+
+local function modemEndpoint(modem, remoteAddress, port, protocol, timeout)
+    local endpoint = {}
+
+    function endpoint.request(requestType)
+        local requestId = nextRequestId(protocol)
+        local deadline = computer.uptime() + (timeout or 5)
+        if remoteAddress then
+            modem.send(remoteAddress, port, protocol, "request", requestId, requestType)
+        else
+            modem.broadcast(port, protocol, "request", requestId, requestType)
+        end
+
+        while true do
+            local _, _, senderAddress, receivedPort, _, receivedProtocol, messageType, receivedRequestId, encoded =
+                event.pull(remaining(deadline), "modem_message")
+            if not senderAddress then return nil, "Request timed out" end
+
+            if receivedPort == port and receivedProtocol == protocol and messageType == "response" and
+                receivedRequestId == requestId and (not remoteAddress or senderAddress == remoteAddress) then
                 return decode(encoded)
             end
         end
@@ -27,9 +85,16 @@ function rpc.tunnel(tunnel, protocol, timeout)
 
     function endpoint.serve(handler)
         while true do
-            local _, _, _, _, _, receivedProtocol, requestType = event.pull("modem_message")
-            if receivedProtocol == protocol then
-                tunnel.send(protocol, "response", serialization.serialize(handler(requestType)))
+            local _, _, senderAddress, receivedPort, _, receivedProtocol, messageType, requestId, requestType =
+                event.pull("modem_message")
+            if receivedPort == port and receivedProtocol == protocol then
+                if messageType == "request" then
+                    modem.send(senderAddress, port, protocol, "response", requestId,
+                        serialization.serialize(handler(requestType)))
+                else
+                    -- Compatibility with uncorrelated clients from before modem RPC used request IDs.
+                    modem.send(senderAddress, port, protocol, "response", serialization.serialize(handler(messageType)))
+                end
             end
         end
     end
@@ -38,32 +103,12 @@ function rpc.tunnel(tunnel, protocol, timeout)
 end
 
 function rpc.modem(modem, port, protocol, timeout)
-    local endpoint = {}
+    return modemEndpoint(modem, nil, port, protocol, timeout)
+end
 
-    function endpoint.request(requestType)
-        modem.broadcast(port, protocol, requestType)
-
-        while true do
-            local _, _, remoteAddress, receivedPort, _, receivedProtocol, messageType, encoded =
-                event.pull(timeout, "modem_message")
-            if not remoteAddress then return nil, "Request timed out" end
-
-            if receivedPort == port and receivedProtocol == protocol and messageType == "response" then
-                return decode(encoded)
-            end
-        end
-    end
-
-    function endpoint.serve(handler)
-        while true do
-            local _, _, remoteAddress, receivedPort, _, receivedProtocol, requestType = event.pull("modem_message")
-            if receivedPort == port and receivedProtocol == protocol then
-                modem.send(remoteAddress, port, protocol, "response", serialization.serialize(handler(requestType)))
-            end
-        end
-    end
-
-    return endpoint
+function rpc.modemUnicast(modem, remoteAddress, port, protocol, timeout)
+    if type(remoteAddress) ~= "string" or remoteAddress == "" then error("remote modem address is required") end
+    return modemEndpoint(modem, remoteAddress, port, protocol, timeout)
 end
 
 return rpc

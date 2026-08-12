@@ -1,18 +1,50 @@
 local component = require("component")
+local discovery = require("meatball.discovery")
 local rpc = require("nuclearcraft.rpc")
+local serviceSelector = require("nuclearcraft.service")
+local shell = require("shell")
 local uiModule = require("nuclearcraft.ui")
 
 local PROTOCOL = "nc-geiger-v1"
 local TIMEOUT = 5
 local REFRESH_INTERVAL = 2
+local SERVICE_TYPE = "meatballcraft.nc.geiger"
+local API_VERSION = 1
+local DISCOVERY_TIMEOUT = 1
+local CONFIG_PATH = "/etc/nuclearcraft/geiger-client.cfg"
 
-local tunnel = component.tunnel
+local _, options = shell.parse(...)
+
+if not component.isAvailable("gpu") then error("No GPU found") end
+
 local gpu = component.gpu
+local endpoint
+local selectedService
 
-if not tunnel then error("No tunnel component found") end
-if not gpu then error("No GPU found") end
+if component.isAvailable("tunnel") then
+    endpoint = rpc.tunnel(component.tunnel, PROTOCOL, TIMEOUT)
+else
+    if not component.isAvailable("modem") then
+        error("No Linked Card or Network Card found (missing 'tunnel' and 'modem' components)")
+    end
+    local modem = component.modem
+    local services, findError = discovery.find(modem, {
+        serviceType = SERVICE_TYPE,
+        apiVersion = API_VERSION,
+        timeout = DISCOVERY_TIMEOUT
+    })
+    if not services then error("Could not discover Geiger counters: " .. tostring(findError)) end
 
-local endpoint = rpc.tunnel(tunnel, PROTOCOL, TIMEOUT)
+    selectedService = serviceSelector.choose(services, {
+        requested = options.geiger,
+        configPath = CONFIG_PATH,
+        label = "Geiger counter",
+        title = "Geiger counters"
+    })
+    modem.open(selectedService.servicePort)
+    endpoint = rpc.modemUnicast(modem, selectedService.address, selectedService.servicePort, PROTOCOL, TIMEOUT)
+end
+
 local request = endpoint.request
 local ui = uiModule.new(gpu)
 
@@ -69,7 +101,10 @@ local function dashboard()
     ui.runDashboard(REFRESH_INTERVAL, function() return request("getRadiation") end, drawDashboard)
 end
 
-ui.runMenu("NC Geiger Counter", {
+local menuTitle = "NC Geiger Counter"
+if selectedService then menuTitle = menuTitle .. " - " .. selectedService.displayName end
+
+ui.runMenu(menuTitle, {
     { key = "1", label = "Current radiation", action = function()
         ui.showResponse(request, "getRadiation", buildRadiation, "radiation")
     end },

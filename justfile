@@ -9,7 +9,23 @@ setup:
     git submodule update --init --recursive
 
 # Run the complete test suite.
-test: e2e e2e-reactor-relay e2e-provision-drive
+test: e2e e2e-package-install e2e-service-discovery e2e-nuclearcraft-discovery e2e-reactor-network e2e-reactor-relay e2e-provision-drive
+
+# Build and launch an OPPM-shaped package using only its manifest files.
+e2e-package-install:
+    ./test/e2e/run test/e2e/fixtures/package-install.lua
+
+# Verify broadcast discovery, offer validation, conflicts, and port ownership.
+e2e-service-discovery:
+    ./test/e2e/run test/e2e/fixtures/service-discovery.lua
+
+# Verify heat and Geiger service advertisement and client transport selection.
+e2e-nuclearcraft-discovery:
+    ./test/e2e/run test/e2e/fixtures/nuclearcraft-discovery.lua
+
+# Boot a client, relay, and reactor server with real wireless and Linked Cards.
+e2e-reactor-network:
+    ./test/e2e/run test/e2e/fixtures/reactor-network.lua
 
 # Verify reactor requests cross the modem/linked-card relay in OpenOS.
 e2e-reactor-relay:

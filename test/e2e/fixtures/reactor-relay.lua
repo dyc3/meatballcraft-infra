@@ -7,26 +7,29 @@ local COMPLETE = "reactor relay test complete"
 local openedPort
 local tunnelRequest
 local networkResponse
+local advertised
+local serviceConfig
 
 local modem = {}
 function modem.open(port)
     openedPort = port
     return true
 end
-function modem.send(address, port, protocol, messageType, encoded)
+function modem.send(address, port, protocol, messageType, requestId, encoded)
     networkResponse = {
         address = address,
         port = port,
         protocol = protocol,
         messageType = messageType,
+        requestId = requestId,
         value = serialization.unserialize(encoded)
     }
     error(COMPLETE)
 end
 
 local tunnel = {}
-function tunnel.send(protocol, requestType)
-    tunnelRequest = { protocol = protocol, requestType = requestType }
+function tunnel.send(protocol, messageType, requestId, requestType)
+    tunnelRequest = { protocol = protocol, messageType = messageType, requestId = requestId, requestType = requestType }
 end
 
 package.loaded.component = {
@@ -34,16 +37,33 @@ package.loaded.component = {
     tunnel = tunnel,
     isAvailable = function(name) return name == "modem" or name == "tunnel" end
 }
+package.loaded["meatball.discovery"] = {
+    PORT = 48700,
+    advertise = function(receivedModem, spec)
+        assert(receivedModem == modem)
+        advertised = spec
+        return { close = function() end }
+    end
+}
+package.loaded["nuclearcraft.service"] = {
+    configure = function(options)
+        serviceConfig = options
+        return { instanceId = options.instanceId, displayName = options.displayName }
+    end,
+    choose = function(services) return services[1] end
+}
 
 local pulls = 0
 package.loaded.event = {
     pull = function(...)
         pulls = pulls + 1
         if pulls == 1 then
-            return "modem_message", "relay-modem", "client-modem", PORT, 1, PROTOCOL, "getAll"
+            return "modem_message", "relay-modem", "client-modem", PORT, 1, PROTOCOL, "request",
+                "client-request-1", "getAll"
         elseif pulls == 2 then
             local response = serialization.serialize({ ok = true, reactor = { reactorOn = true } })
-            return "modem_message", "relay-tunnel", "server-tunnel", 0, 1, PROTOCOL, "response", response
+            return "modem_message", "relay-tunnel", "server-tunnel", 0, 1, PROTOCOL, "response",
+                tunnelRequest.requestId, response
         end
         error("unexpected event pull")
     end
@@ -62,22 +82,76 @@ assert(mount, "e2e filesystem was not mounted")
 assert(loadfile(mount .. "/repo/nuclearcraft/reactor-client.lua"))
 assert(loadfile(mount .. "/repo/nuclearcraft/reactor-server.lua"))
 
-local ok, failure = pcall(dofile, mount .. "/repo/nuclearcraft/reactor-relay.lua")
+local relayChunk = assert(loadfile(mount .. "/repo/nuclearcraft/reactor-relay.lua"))
+local ok, failure = pcall(relayChunk, "--id=reactor-test", "--name=Test Reactor")
 assert(not ok and tostring(failure):find(COMPLETE, 1, true), tostring(failure))
 assert(openedPort == PORT, "relay did not open the reactor network port")
+assert(serviceConfig and serviceConfig.configPath and serviceConfig.instanceId == "reactor-test",
+    "relay did not resolve its persisted service configuration")
+assert(advertised and advertised.instanceId == "reactor-test" and advertised.displayName == "Test Reactor",
+    "relay did not advertise its configured identity")
+assert(advertised.serviceType == "meatballcraft.nc.reactor" and advertised.servicePort == PORT,
+    "relay advertised the wrong service endpoint")
 assert(tunnelRequest and tunnelRequest.protocol == PROTOCOL, "relay used the wrong linked-card protocol")
+assert(tunnelRequest.messageType == "request" and tunnelRequest.requestId, "relay did not correlate its tunnel request")
 assert(tunnelRequest.requestType == "getAll", "relay did not forward the request type")
 assert(networkResponse and networkResponse.address == "client-modem", "relay replied to the wrong network client")
 assert(networkResponse.port == PORT and networkResponse.protocol == PROTOCOL, "relay replied on the wrong endpoint")
 assert(networkResponse.messageType == "response", "relay did not send an RPC response")
+assert(networkResponse.requestId == "client-request-1", "relay did not preserve the client request ID")
 assert(networkResponse.value.ok == true, "relay did not preserve the server response")
 assert(networkResponse.value.reactor.reactorOn == true, "relay response lost reactor data")
+
+local rpc = require("nuclearcraft.rpc")
+local rpcSent
+local rpcPulls = 0
+local rpcModem = {
+    send = function(address, port, protocol, messageType, requestId, requestType)
+        rpcSent = {
+            address = address,
+            port = port,
+            protocol = protocol,
+            messageType = messageType,
+            requestId = requestId,
+            requestType = requestType
+        }
+    end
+}
+package.loaded.event.pull = function()
+    rpcPulls = rpcPulls + 1
+    local encoded = serialization.serialize({ ok = true, source = "selected-relay" })
+    if rpcPulls == 1 then
+        return "modem_message", "client", "other-relay", PORT, 1, PROTOCOL, "response", rpcSent.requestId, encoded
+    end
+    return "modem_message", "client", "selected-relay", PORT, 1, PROTOCOL, "response", rpcSent.requestId, encoded
+end
+local unicastResponse = assert(rpc.modemUnicast(rpcModem, "selected-relay", PORT, PROTOCOL, 5).request("getAll"))
+assert(rpcSent.address == "selected-relay" and rpcSent.messageType == "request", "unicast RPC sent to the wrong relay")
+assert(rpcSent.requestId and rpcSent.requestType == "getAll", "unicast RPC request was not correlated")
+assert(rpcPulls == 2 and unicastResponse.source == "selected-relay", "unicast RPC accepted another relay's response")
+
+local legacyRequest
+local legacyTunnel = {
+    send = function(protocol, messageType, requestId, requestType)
+        legacyRequest = { protocol = protocol, messageType = messageType, requestId = requestId, requestType = requestType }
+    end
+}
+package.loaded.event.pull = function()
+    return "modem_message", "relay", "legacy-server", 0, 1, PROTOCOL, "response",
+        serialization.serialize({ ok = true })
+end
+local legacyResponse, legacyError = rpc.tunnel(legacyTunnel, PROTOCOL, 5).request("getAll")
+assert(not legacyResponse and legacyError and legacyError:find("Incompatible RPC peer", 1, true),
+    "new relay did not identify a legacy reactor server response")
+assert(legacyRequest.messageType == "request" and legacyRequest.requestType == "getAll",
+    "compatibility test did not send a current RPC request")
 
 local CLIENT_COMPLETE = "reactor client transport selected"
 
 local function testClientTransport(hasTunnel)
     local selected
     local clientPort
+    local discoveryCalls = 0
     local clientModem = {
         open = function(port)
             clientPort = port
@@ -98,9 +172,25 @@ local function testClientTransport(hasTunnel)
             selected = { kind = "tunnel", protocol = protocol, timeout = timeout }
             return { request = function() end }
         end,
-        modem = function(_, port, protocol, timeout)
-            selected = { kind = "modem", port = port, protocol = protocol, timeout = timeout }
+        modemUnicast = function(_, address, port, protocol, timeout)
+            selected = { kind = "modem", address = address, port = port, protocol = protocol, timeout = timeout }
             return { request = function() end }
+        end
+    }
+    package.loaded["meatball.discovery"] = {
+        find = function(receivedModem, query)
+            discoveryCalls = discoveryCalls + 1
+            assert(receivedModem == clientModem, "client discovered on the wrong modem")
+            assert(query.serviceType == "meatballcraft.nc.reactor" and query.apiVersion == 1,
+                "client queried the wrong service")
+            return {
+                {
+                    instanceId = "reactor-test",
+                    displayName = "Test Reactor",
+                    address = "relay-address",
+                    servicePort = PORT
+                }
+            }
         end
     }
     package.loaded["nuclearcraft.ui"] = {
@@ -115,9 +205,12 @@ local function testClientTransport(hasTunnel)
 
     if hasTunnel then
         assert(selected.kind == "tunnel", "client did not prefer its Linked Card")
+        assert(discoveryCalls == 0, "client used service discovery despite having a Linked Card")
         assert(clientPort == nil, "client opened the modem while using its Linked Card")
     else
         assert(selected.kind == "modem", "client did not fall back to the reactor relay")
+        assert(discoveryCalls == 1, "client did not discover a reactor relay")
+        assert(selected.address == "relay-address", "client did not unicast to the discovered relay")
         assert(selected.port == PORT and clientPort == PORT, "client used the wrong reactor relay port")
     end
 end
