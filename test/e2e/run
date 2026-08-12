@@ -1,0 +1,52 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/../.." && pwd)
+launcher="$script_dir/.cache/sbt-launch-1.10.11.jar"
+program=${1:-test/e2e/fixtures/smoke.lua}
+java_cmd=${OC_E2E_JAVA:-}
+
+if [ "$#" -gt 1 ]; then
+  echo "usage: $0 [repository-relative-program.lua]" >&2
+  exit 64
+fi
+
+if [ -z "$java_cmd" ]; then
+  for candidate in \
+    /usr/lib/jvm/java-17-openjdk-amd64/bin/java \
+    /usr/lib/jvm/java-17-openjdk/bin/java \
+    /usr/lib/jvm/openjdk-17/bin/java
+  do
+    if [ -x "$candidate" ]; then
+      java_cmd=$candidate
+      break
+    fi
+  done
+fi
+
+if [ -z "$java_cmd" ]; then
+  java_cmd=java
+fi
+
+if [ ! -f "$launcher" ]; then
+  mkdir -p "$script_dir/.cache"
+  echo "Downloading sbt 1.10.11 launcher..." >&2
+  curl --fail --location --silent --show-error \
+    "https://repo.maven.apache.org/maven2/org/scala-sbt/sbt-launch/1.10.11/sbt-launch-1.10.11.jar" \
+    --output "$launcher"
+fi
+
+export OC_E2E_ROOT="$repo_root"
+export OC_E2E_PROGRAM="$program"
+export COURSIER_CACHE="$script_dir/.cache/coursier"
+
+cd "$script_dir"
+exec "$java_cmd" \
+  -Dsbt.log.noformat=true \
+  -Dsbt.server.autostart=false \
+  -Dsbt.boot.directory="$script_dir/.cache/boot" \
+  -Dsbt.global.base="$script_dir/.cache/global" \
+  -Dsbt.ivy.home="$script_dir/.cache/ivy" \
+  -jar "$launcher" \
+  "runMain meatballcraft.e2e.Runner"
