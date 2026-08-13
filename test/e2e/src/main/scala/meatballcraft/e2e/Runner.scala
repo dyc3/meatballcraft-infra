@@ -49,7 +49,13 @@ object Runner {
       } else if (requestedProgram == DashboardNetworkProgram) {
         runDashboardNetwork(root, workspaceRoot, temporaryRoot)
       } else {
-        if (requestedProgram == "test/e2e/fixtures/provision-drive.lua") {
+        if (requestedProgram == "test/e2e/fixtures/package-install.lua") {
+          copyTree(
+            root.resolve("test/ocelot-brain/src/main/resources/assets/opencomputers/loot/openos"),
+            diskRoot
+          )
+          Files.deleteIfExists(diskRoot.resolve(".prop"))
+        } else if (requestedProgram == "test/e2e/fixtures/provision-drive.lua") {
           copyTree(
             root.resolve("test/ocelot-brain/src/main/resources/assets/opencomputers/loot/openos"),
             diskRoot
@@ -68,6 +74,14 @@ object Runner {
           )
         }
         stageRepository(root, diskRoot)
+        if (requestedProgram == "test/e2e/fixtures/package-install.lua") {
+          val stagedOppm = diskRoot.resolve("repo/test/e2e/fixtures/oppm-under-test.lua")
+          Files.createDirectories(stagedOppm.getParent)
+          Files.copy(
+            root.resolve("test/ocelot-brain/src/main/resources/assets/opencomputers/loot/oppm/usr/bin/oppm.lua"),
+            stagedOppm
+          )
+        }
         writeAutorun(diskRoot, root.relativize(program).toString.replace('\\', '/'))
         runComputer(root, workspaceRoot, diskRoot, requestedProgram)
       }
@@ -658,6 +672,8 @@ object Runner {
       computer.inventory(7) = targetDisk
       computer.inventory(8) = new InternetCard()
 
+      eeprom.volatileData = testDisk.node.address.getBytes(StandardCharsets.UTF_8)
+    } else if (program == "test/e2e/fixtures/package-install.lua") {
       eeprom.volatileData = testDisk.node.address.getBytes(StandardCharsets.UTF_8)
     }
 

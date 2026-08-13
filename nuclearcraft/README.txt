@@ -7,7 +7,20 @@ Shared libraries
   request/response traffic.
 - nuclearcraft.service provides named-service selection and remembers the
   selected instance ID while rediscovering its current modem address each run.
-- OPPM installs the required libraries with each client or server package.
+- OPPM resolves the required libraries when installing each client or server package.
+- OPPM installs shared modules through the nc-common and meatball-discovery
+  dependency packages. Executable packages do not duplicate ownership of files
+  under /lib.
+
+Package ownership migration
+- Packages installed before nc-common was introduced recorded shared /lib files
+  as their own. OPPM cannot transfer that ownership during an update.
+- Do not use oppm install -f: it leaves multiple packages claiming the same files.
+- On an existing computer, note the installed nc-* packages with `oppm list -i`,
+  uninstall all of those old nc-* packages, and also uninstall
+  meatball-discovery if it is listed. Then install the packages you need again.
+  Their nc-common and meatball-discovery dependencies will be installed once.
+- Saved service configuration under /etc/nuclearcraft is not removed.
 
 dashboard.lua
 - Discovers every reactor relay, heat exchanger, turbine, and networked Geiger

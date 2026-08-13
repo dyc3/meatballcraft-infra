@@ -23,13 +23,19 @@ local manifestFile = assert(io.open(mount .. "/repo/programs.cfg", "r"))
 local manifest = assert(serialization.unserialize(manifestFile:read("*a")))
 manifestFile:close()
 local discoverySource = "master/service-discovery/lib/meatball/discovery.lua"
+assert(manifest["meatball-discovery"].files[discoverySource] == "/lib/meatball",
+    "meatball-discovery does not own the discovery library")
 for _, packageName in ipairs({
     "nc-geiger-client", "nc-geiger-server", "nc-heat-client", "nc-heat-server",
-    "nc-reactor-client", "nc-reactor-relay"
+    "nc-reactor-client", "nc-reactor-relay", "nc-turbine-client", "nc-turbine-server", "nc-dashboard"
 }) do
-    assert(manifest[packageName].files[discoverySource] == "/lib/meatball",
-        packageName .. " updates do not install the discovery library")
+    assert(manifest[packageName].dependencies["meatball-discovery"] == "/",
+        packageName .. " does not depend on the discovery library package")
+    assert(manifest[packageName].dependencies["nc-common"] == "/",
+        packageName .. " does not depend on the NuclearCraft library package")
 end
+assert(manifest["nc-reactor-server"].dependencies["nc-common"] == "/",
+    "reactor server does not depend on the NuclearCraft library package")
 
 local width, height = component.gpu.getResolution()
 assert(width > 0 and height > 0, "GPU has no usable resolution")
