@@ -146,6 +146,18 @@ assert(not legacyResponse and legacyError and legacyError:find("Incompatible RPC
 assert(legacyRequest.messageType == "request" and legacyRequest.requestType == "getAll",
     "compatibility test did not send a current RPC request")
 
+package.loaded.event.pull = function() return nil end
+local timedOutResponse, timedOutError = rpc.tunnel(legacyTunnel, PROTOCOL, 5).request("getAll")
+assert(not timedOutResponse and timedOutError:find("Request sent", 1, true) and
+    timedOutError:find("no response received", 1, true), "RPC timeout did not distinguish a missing response")
+
+package.loaded.event.pull = function()
+    return "modem_message", "relay", "server", 0, 1, PROTOCOL, "response", legacyRequest.requestId, "not serialized"
+end
+local malformedResponse, malformedError = rpc.tunnel(legacyTunnel, PROTOCOL, 5).request("getAll")
+assert(not malformedResponse and malformedError:find("Response received", 1, true) and
+    malformedError:find("wrong shape", 1, true), "RPC did not distinguish a malformed response: " .. tostring(malformedError))
+
 local CLIENT_COMPLETE = "reactor client transport selected"
 
 local function testClientTransport(hasTunnel)
@@ -192,6 +204,12 @@ local function testClientTransport(hasTunnel)
                 }
             }
         end
+    }
+    package.loaded["nuclearcraft.service"] = {
+        discover = function(discoveryModule, receivedModem, options)
+            return discoveryModule.find(receivedModem, options)
+        end,
+        choose = function(services) return services[1] end
     }
     package.loaded["nuclearcraft.ui"] = {
         new = function()

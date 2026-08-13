@@ -210,6 +210,7 @@ function discovery.find(modem, query)
 
     local requestId = nextRequestId(modem)
     local found = {}
+    local diagnostics = { offersReceived = 0, offersAccepted = 0, offersRejected = 0 }
     local function listener(_, localAddress, remoteAddress, port, _, protocol, kind, receivedRequestId,
                             serviceType, instanceId, apiVersion, servicePort, encodedDetails)
         if not sameModem(modem, localAddress) then return end
@@ -217,12 +218,20 @@ function discovery.find(modem, query)
         if receivedRequestId ~= requestId or serviceType ~= validated.serviceType or apiVersion ~= validated.apiVersion then
             return
         end
-        if type(remoteAddress) ~= "string" or remoteAddress == "" then return end
-        if not boundedString(instanceId, "instanceId", MAX_INSTANCE_ID) then return end
-        if not validInteger(servicePort, "servicePort", 1, 65535) then return end
+        diagnostics.offersReceived = diagnostics.offersReceived + 1
+        if type(remoteAddress) ~= "string" or remoteAddress == "" or
+            not boundedString(instanceId, "instanceId", MAX_INSTANCE_ID) or
+            not validInteger(servicePort, "servicePort", 1, 65535) then
+            diagnostics.offersRejected = diagnostics.offersRejected + 1
+            return
+        end
 
         local details = decodeDetails(encodedDetails)
-        if not details then return end
+        if not details then
+            diagnostics.offersRejected = diagnostics.offersRejected + 1
+            return
+        end
+        diagnostics.offersAccepted = diagnostics.offersAccepted + 1
 
         local key = instanceId .. "\0" .. remoteAddress
         found[key] = {
@@ -255,7 +264,7 @@ function discovery.find(modem, query)
 
     event.ignore("modem_message", listener)
     releasePort(modem)
-    if not ok then return nil, tostring(reason) end
+    if not ok then return nil, tostring(reason), diagnostics end
 
     local services = {}
     local identities = {}
@@ -272,7 +281,7 @@ function discovery.find(modem, query)
         return left.address < right.address
     end)
 
-    return services
+    return services, nil, diagnostics
 end
 
 return discovery

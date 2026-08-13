@@ -85,7 +85,7 @@ object Runner {
     copyTree(root.resolve("test/ocelot-brain/src/main/resources/assets/opencomputers/loot/openos"), roleRoot)
     Files.deleteIfExists(roleRoot.resolve(".prop"))
     stageRepository(root, roleRoot)
-    writeTopologyAutorun(roleRoot, program, arguments, role == "client")
+    writeTopologyAutorun(roleRoot, program, arguments, role == "client" || role.endsWith("-client"))
 
     val computer = workspace.add(new Case(Tier.Creative))
     val screen = workspace.add(new Screen(Tier.Three))
@@ -170,11 +170,17 @@ object Runner {
     val connectedRendered = new AtomicBoolean(false)
     val onlineRendered = new AtomicBoolean(false)
     val completeRendered = new AtomicBoolean(false)
+    val discoveringRendered = new AtomicBoolean(false)
+    val discoveryCountRendered = new AtomicBoolean(false)
+    val requestingRendered = new AtomicBoolean(false)
     val roles = computers.map(node => node.computer.node.address -> node).toMap
     EventBus.subscribe {
       case event: MachineCrashEvent if roles.contains(event.address) =>
         crash.compareAndSet(null, s"${roles(event.address).diskRoot.getFileName}: ${event.message}")
       case event: TextBufferSetEvent if event.address == client.screen.node.address =>
+        if (event.value.contains("Discovering reactor relays")) discoveringRendered.set(true)
+        if (event.value.contains("[1 discovered]")) discoveryCountRendered.set(true)
+        if (event.value.contains("REQUESTING") || event.value.contains("Request sent")) requestingRendered.set(true)
         if (event.value.contains("CONNECTED")) connectedRendered.set(true)
         if (event.value.contains("ONLINE")) onlineRendered.set(true)
         if (event.value.contains("COMPLETE")) completeRendered.set(true)
@@ -221,9 +227,59 @@ object Runner {
       throw new RuntimeException(s"Real reactor client exited:\n${result.stripPrefix("FAIL\n")}\n$screens")
     } else if (!clientConnected) {
       throw new RuntimeException(s"Real reactor client did not receive data after $TimeoutSeconds seconds\n$screens")
+    } else if (!discoveringRendered.get() || !discoveryCountRendered.get() || !requestingRendered.get()) {
+      throw new RuntimeException(
+        s"Real reactor client did not render discovery/request diagnostics " +
+          s"(discovering=${discoveringRendered.get()}, count=${discoveryCountRendered.get()}, " +
+          s"requesting=${requestingRendered.get()})\n$screens"
+      )
     }
 
-    println(s"PASS: $ReactorNetworkProgram (real 3-computer wireless + Linked Card topology)")
+    runEmptyReactorDiscovery(root, workspaceRoot.resolve("empty-discovery"), temporaryRoot)
+    println(s"PASS: $ReactorNetworkProgram (real 3-computer topology plus real zero-provider discovery)")
+  }
+
+  private def runEmptyReactorDiscovery(root: Path, workspaceRoot: Path, temporaryRoot: Path): Unit = {
+    Files.createDirectories(workspaceRoot)
+    val workspace = new Workspace(workspaceRoot)
+    val client = createTopologyComputer(root, temporaryRoot, workspace, "empty-client",
+      "nuclearcraft/reactor-client.lua", Seq.empty, wireless = true, None)
+    val crash = new AtomicReference[String]()
+    val discoveringRendered = new AtomicBoolean(false)
+    val zeroCountRendered = new AtomicBoolean(false)
+    val troubleshootingRendered = new AtomicBoolean(false)
+
+    EventBus.subscribe {
+      case event: MachineCrashEvent if event.address == client.computer.node.address => crash.set(event.message)
+      case event: TextBufferSetEvent if event.address == client.screen.node.address =>
+        if (event.value.contains("Discovering reactor relays")) discoveringRendered.set(true)
+        if (event.value.contains("0 valid reactor relays discovered")) zeroCountRendered.set(true)
+        if (event.value.contains("no service responded") || event.value.contains("Check that the server is running")) {
+          troubleshootingRendered.set(true)
+        }
+    }
+
+    val resultPath = client.diskRoot.resolve(ResultFile)
+    val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
+    client.computer.machine.start()
+    while (!resultReady(resultPath) && crash.get() == null && System.nanoTime() < deadline) {
+      workspace.update()
+      Thread.sleep(10)
+    }
+
+    val screen = renderScreen(client.screen)
+    val result = if (Files.exists(resultPath)) Files.readString(resultPath, StandardCharsets.UTF_8) else ""
+    client.computer.machine.stop()
+    if (crash.get() != null) {
+      throw new RuntimeException(s"Zero-provider reactor client crashed: ${crash.get()}\n$screen")
+    } else if (!result.startsWith("PASS\n")) {
+      throw new RuntimeException(s"Zero-provider reactor client did not exit cleanly: $result\n$screen")
+    } else if (!discoveringRendered.get() || !zeroCountRendered.get() || !troubleshootingRendered.get()) {
+      throw new RuntimeException(
+        s"Zero-provider diagnostics were incomplete (discovering=${discoveringRendered.get()}, " +
+          s"count=${zeroCountRendered.get()}, troubleshooting=${troubleshootingRendered.get()})\n$screen"
+      )
+    }
   }
 
   private def runComputer(root: Path, workspaceRoot: Path, diskRoot: Path, program: String): Unit = {

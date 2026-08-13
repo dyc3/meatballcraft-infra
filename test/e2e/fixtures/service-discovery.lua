@@ -112,13 +112,15 @@ function modem.broadcast(port, protocol, kind, requestId, serviceType, apiVersio
     return true
 end
 
-local services, findError = discovery.find(modem, {
+local services, findError, diagnostics = discovery.find(modem, {
     serviceType = "meatballcraft.nc.reactor",
     apiVersion = 1,
     timeout = 1
 })
 assert(services, findError)
 assert(#services == 3, "discovery did not deduplicate and validate offers")
+assert(diagnostics.offersReceived == 5 and diagnostics.offersAccepted == 4 and diagnostics.offersRejected == 1,
+    "discovery did not report accepted and rejected matching offers")
 assert(services[1].displayName == "North Reactor", "services were not sorted by display name")
 assert(services[1].address == "relay-a" and services[1].metadata.zone == "north", "offer fields were lost")
 assert(services[1].conflict and services[2].conflict, "duplicate instance IDs were not marked as conflicts")

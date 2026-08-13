@@ -109,10 +109,52 @@ local function matchingInstance(services, instanceId)
     return match, count
 end
 
+local function plural(label, count)
+    if count == 1 then return label end
+    return label .. "s"
+end
+
+function service.discover(discovery, modem, options)
+    options = options or {}
+    local label = options.label or "service"
+    local timeout = options.timeout or 1
+    print(string.format("Discovering %s on the modem network (%.1fs)...", plural(label, 2), timeout))
+
+    local services, reason, diagnostics = discovery.find(modem, {
+        serviceType = options.serviceType,
+        apiVersion = options.apiVersion,
+        timeout = timeout
+    })
+    diagnostics = diagnostics or {}
+    if not services then
+        return nil, "Discovery request failed: " .. tostring(reason)
+    end
+
+    local received = diagnostics.offersReceived or #services
+    local rejected = diagnostics.offersRejected or 0
+    print(string.format("Discovery complete: %d valid %s discovered (%d offers received, %d rejected).",
+        #services, plural(label, #services), received, rejected))
+
+    if #services == 0 then
+        if rejected > 0 then
+            return nil, string.format(
+                "No valid %s found: the discovery request received %d invalid or incompatible offers.",
+                plural(label, 2), rejected)
+        end
+        return nil, string.format(
+            "No %s found: the discovery request was broadcast, but no service responded. " ..
+            "Check that the server is running, in wireless range, and using discovery port 48700.", plural(label, 2))
+    end
+
+    return services, nil, diagnostics
+end
+
 function service.choose(services, options)
     options = options or {}
     local label = options.label or "service"
-    if type(services) ~= "table" or #services == 0 then error("No " .. label .. " services found on the modem network") end
+    if type(services) ~= "table" or #services == 0 then
+        return nil, "No " .. plural(label, 2) .. " found on the modem network"
+    end
 
     local preferred = options.requested or loadPreferredInstance(options.configPath)
     local matched, matchCount = matchingInstance(services, preferred)
@@ -121,8 +163,8 @@ function service.choose(services, options)
     if matchCount == 1 then
         selected = matched
     elseif options.requested then
-        if matchCount == 0 then error("Requested " .. label .. " not found: " .. options.requested) end
-        error("Requested " .. label .. " identity is duplicated: " .. options.requested)
+        if matchCount == 0 then return nil, "Requested " .. label .. " not found: " .. options.requested end
+        return nil, "Requested " .. label .. " identity is duplicated: " .. options.requested
     elseif #services == 1 then
         selected = services[1]
     else

@@ -20,6 +20,7 @@ if not component.isAvailable("gpu") then error("No GPU found") end
 local gpu = component.gpu
 local endpoint
 local selectedService
+local discoveredServiceCount
 
 if component.isAvailable("tunnel") then
     endpoint = rpc.tunnel(component.tunnel, PROTOCOL, TIMEOUT)
@@ -28,20 +29,35 @@ else
         error("No Linked Card or Network Card found (missing 'tunnel' and 'modem' components)")
     end
     local modem = component.modem
-    local services, findError = discovery.find(modem, {
+    local services, findError = serviceSelector.discover(discovery, modem, {
         serviceType = SERVICE_TYPE,
         apiVersion = API_VERSION,
-        timeout = DISCOVERY_TIMEOUT
+        timeout = DISCOVERY_TIMEOUT,
+        label = "Geiger counter"
     })
-    if not services then error("Could not discover Geiger counters: " .. tostring(findError)) end
+    if not services then
+        io.stderr:write("ERROR: ", tostring(findError), "\n")
+        return
+    end
+    discoveredServiceCount = #services
 
-    selectedService = serviceSelector.choose(services, {
+    local selectionError
+    selectedService, selectionError = serviceSelector.choose(services, {
         requested = options.geiger,
         configPath = CONFIG_PATH,
         label = "Geiger counter",
         title = "Geiger counters"
     })
-    modem.open(selectedService.servicePort)
+    if not selectedService then
+        io.stderr:write("ERROR: ", tostring(selectionError), "\n")
+        return
+    end
+    local opened, openError = modem.open(selectedService.servicePort)
+    if not opened then
+        io.stderr:write("ERROR: Discovered ", selectedService.displayName, ", but could not open application port ",
+            tostring(selectedService.servicePort), ": ", tostring(openError), "\n")
+        return
+    end
     endpoint = rpc.modemUnicast(modem, selectedService.address, selectedService.servicePort, PROTOCOL, TIMEOUT)
 end
 
@@ -71,11 +87,13 @@ local function buildRadiation(radiation)
     return lines
 end
 
-local function drawDashboard(response, err)
+local function drawDashboard(response, err, status)
     local width, height = ui.clear()
 
     ui.draw(1, 1, "NC GEIGER COUNTER", HEADER)
-    if err then
+    if status == "requesting" then
+        ui.draw(math.max(1, width - 11), 1, "REQUESTING", WARN)
+    elseif err then
         local text = "ERROR " .. tostring(err)
         ui.draw(math.max(1, width - #text + 1), 1, text, BAD)
     else
@@ -91,18 +109,22 @@ local function drawDashboard(response, err)
         end
         if radiation.error then ui.draw(1, 6, tostring(radiation.error), BAD) end
     else
-        ui.draw(1, 4, "Waiting for radiation data...", WARN)
+        ui.draw(1, 4, status == "requesting" and "Request sent; waiting for response..." or
+            "No valid radiation data received.", WARN)
     end
 
     ui.draw(1, height, "Refresh " .. REFRESH_INTERVAL .. "s   q=back   r=refresh", MUTED)
 end
 
 local function dashboard()
-    ui.runDashboard(REFRESH_INTERVAL, function() return request("getRadiation") end, drawDashboard)
+    ui.runDashboard(REFRESH_INTERVAL, function() return request("getRadiation") end, drawDashboard, "radiation")
 end
 
 local menuTitle = "NC Geiger Counter"
-if selectedService then menuTitle = menuTitle .. " - " .. selectedService.displayName end
+if selectedService then
+    menuTitle = menuTitle .. " - " .. selectedService.displayName ..
+        string.format(" [%d discovered]", discoveredServiceCount)
+end
 
 ui.runMenu(menuTitle, {
     { key = "1", label = "Current radiation", action = function()

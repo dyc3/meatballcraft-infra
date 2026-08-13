@@ -12,8 +12,13 @@ end
 
 local function decode(encoded)
     local ok, response = pcall(serialization.unserialize, encoded)
-    if not ok or response == nil then return nil, "Invalid response" end
+    if not ok or response == nil then return nil, "Response received, but its payload is invalid" end
+    if type(response) ~= "table" then return nil, "Response received, but its payload has the wrong shape (expected a table)" end
     return response
+end
+
+local function timeoutError(timeout)
+    return string.format("Request sent; no response received within %.1f seconds", timeout or 5)
 end
 
 local function remaining(deadline)
@@ -31,7 +36,7 @@ function rpc.tunnel(tunnel, protocol, timeout)
         while true do
             local _, _, _, _, _, receivedProtocol, messageType, receivedRequestId, encoded =
                 event.pull(remaining(deadline), "modem_message")
-            if not receivedProtocol then return nil, "Request timed out" end
+            if not receivedProtocol then return nil, timeoutError(timeout) end
 
             if receivedProtocol == protocol and messageType == "response" then
                 if receivedRequestId == requestId then return decode(encoded) end
@@ -48,9 +53,6 @@ function rpc.tunnel(tunnel, protocol, timeout)
             if receivedProtocol == protocol then
                 if messageType == "request" then
                     tunnel.send(protocol, "response", requestId, serialization.serialize(handler(requestType)))
-                else
-                    -- Compatibility with uncorrelated clients from before RPC used request IDs.
-                    tunnel.send(protocol, "response", serialization.serialize(handler(messageType)))
                 end
             end
         end
@@ -74,7 +76,7 @@ local function modemEndpoint(modem, remoteAddress, port, protocol, timeout)
         while true do
             local _, _, senderAddress, receivedPort, _, receivedProtocol, messageType, receivedRequestId, encoded =
                 event.pull(remaining(deadline), "modem_message")
-            if not senderAddress then return nil, "Request timed out" end
+            if not senderAddress then return nil, timeoutError(timeout) end
 
             if receivedPort == port and receivedProtocol == protocol and messageType == "response" and
                 receivedRequestId == requestId and (not remoteAddress or senderAddress == remoteAddress) then
@@ -91,9 +93,6 @@ local function modemEndpoint(modem, remoteAddress, port, protocol, timeout)
                 if messageType == "request" then
                     modem.send(senderAddress, port, protocol, "response", requestId,
                         serialization.serialize(handler(requestType)))
-                else
-                    -- Compatibility with uncorrelated clients from before modem RPC used request IDs.
-                    modem.send(senderAddress, port, protocol, "response", serialization.serialize(handler(messageType)))
                 end
             end
         end

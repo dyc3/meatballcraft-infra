@@ -53,12 +53,41 @@ local selected = serviceSelector.choose({
 }, { label = "test service" })
 assert(selected.instanceId == "only", "service selector did not automatically choose one result")
 
-local duplicateOk, duplicateError = pcall(serviceSelector.choose, {
+local noSelection, noSelectionError = serviceSelector.choose({}, { label = "test service" })
+assert(not noSelection and noSelectionError == "No test services found on the modem network",
+    "empty service selection threw or returned an unclear error")
+
+local duplicateSelection, duplicateError = serviceSelector.choose({
     { instanceId = "duplicate", displayName = "First", address = "first", servicePort = 1 },
     { instanceId = "duplicate", displayName = "Second", address = "second", servicePort = 1 }
 }, { requested = "duplicate", label = "test service" })
-assert(not duplicateOk and tostring(duplicateError):find("duplicated", 1, true),
+assert(not duplicateSelection and tostring(duplicateError):find("duplicated", 1, true),
     "service selector silently chose a duplicated requested identity")
+
+local discoveryOutput = {}
+local savedPrint = print
+print = function(...)
+    local parts = {}
+    for index = 1, select("#", ...) do parts[index] = tostring(select(index, ...)) end
+    discoveryOutput[#discoveryOutput + 1] = table.concat(parts, "\t")
+end
+local discovered, discoveryError = serviceSelector.discover({
+    find = function()
+        return {}, nil, { offersReceived = 2, offersAccepted = 0, offersRejected = 2 }
+    end
+}, {}, {
+    serviceType = "meatballcraft.nc.reactor",
+    apiVersion = 1,
+    timeout = 1,
+    label = "reactor relay"
+})
+print = savedPrint
+assert(not discovered and discoveryError:find("2 invalid or incompatible offers", 1, true),
+    "empty discovery did not explain rejected offers")
+local renderedDiscovery = table.concat(discoveryOutput, "\n")
+assert(renderedDiscovery:find("Discovering reactor relays", 1, true), "discovery did not show that it was running")
+assert(renderedDiscovery:find("0 valid reactor relays discovered", 1, true),
+    "discovery did not show its result count")
 
 local function runServer(program, hasTunnel, serviceType, port)
     local advertised
@@ -151,6 +180,9 @@ local function runClient(program, hasTunnel, serviceType, port)
         end
     }
     package.loaded["nuclearcraft.service"] = {
+        discover = function(discoveryModule, receivedModem, options)
+            return discoveryModule.find(receivedModem, options)
+        end,
         choose = function(services, options)
             assert(#services == 1 and options.requested == nil)
             assert(options.configPath and options.label and options.title)
@@ -194,5 +226,44 @@ runServer("geiger-server.lua", false, "meatballcraft.nc.geiger", 48721)
 runClient("heat-client.lua", false, "meatballcraft.nc.heat-exchanger", 48722)
 runClient("geiger-client.lua", true, "meatballcraft.nc.geiger", 48721)
 runClient("geiger-client.lua", false, "meatballcraft.nc.geiger", 48721)
+
+local function runClientWithNoServices(program)
+    local modem = {}
+    package.loaded.component = {
+        gpu = {},
+        modem = modem,
+        isAvailable = function(name) return name == "gpu" or name == "modem" end
+    }
+    package.loaded["meatball.discovery"] = {
+        find = function()
+            return {}, nil, { offersReceived = 0, offersAccepted = 0, offersRejected = 0 }
+        end
+    }
+    package.loaded["nuclearcraft.service"] = serviceSelector
+    package.loaded["nuclearcraft.rpc"] = {
+        modemUnicast = function() error("empty discovery unexpectedly constructed an RPC endpoint") end
+    }
+    package.loaded["nuclearcraft.ui"] = {
+        new = function() error("empty discovery unexpectedly opened the UI") end
+    }
+
+    local output = {}
+    local savedPrint = print
+    print = function(...)
+        local parts = {}
+        for index = 1, select("#", ...) do parts[index] = tostring(select(index, ...)) end
+        output[#output + 1] = table.concat(parts, "\t")
+    end
+    local chunk = assert(loadfile(mount .. "/repo/nuclearcraft/" .. program))
+    local ok, reason = pcall(chunk)
+    print = savedPrint
+    assert(ok, program .. " emitted a stack trace when discovery returned no services: " .. tostring(reason))
+    assert(table.concat(output, "\n"):find("0 valid", 1, true),
+        program .. " did not display the empty discovery count")
+end
+
+runClientWithNoServices("reactor-client.lua")
+runClientWithNoServices("heat-client.lua")
+runClientWithNoServices("geiger-client.lua")
 
 print("NuclearCraft service discovery integration test complete")

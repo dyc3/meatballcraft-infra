@@ -171,9 +171,15 @@ function ui.new(gpu)
     end
 
     function screen.showResponse(request, requestType, builder, field)
+        print("Sending request '" .. tostring(requestType) .. "'; waiting for response...")
         local response, err = request(requestType)
         if not response then
-            print("ERROR: " .. tostring(err))
+            print("REQUEST FAILED: " .. tostring(err))
+            os.sleep(1)
+            return
+        end
+        if type(response.ok) ~= "boolean" then
+            print("INVALID RESPONSE: missing boolean 'ok' field")
             os.sleep(1)
             return
         end
@@ -182,18 +188,28 @@ function ui.new(gpu)
             os.sleep(1)
             return
         end
+        if field and type(response[field]) ~= "table" then
+            print("INVALID RESPONSE: missing or invalid '" .. tostring(field) .. "' data")
+            os.sleep(1)
+            return
+        end
         screen.view(builder(response[field]))
     end
 
-    function screen.runDashboard(refreshInterval, load, render)
+    function screen.runDashboard(refreshInterval, load, render, expectedField)
         local response = nil
         local lastError = nil
         local refresh = true
 
         while true do
             if refresh then
+                render(response, nil, "requesting")
                 local newResponse, err = load()
-                if newResponse and newResponse.ok then
+                if newResponse and type(newResponse.ok) ~= "boolean" then
+                    lastError = "Response received, but it is missing the boolean 'ok' field"
+                elseif newResponse and newResponse.ok and expectedField and type(newResponse[expectedField]) ~= "table" then
+                    lastError = "Response received, but '" .. expectedField .. "' data is missing or invalid"
+                elseif newResponse and newResponse.ok then
                     response = newResponse
                     lastError = nil
                 else

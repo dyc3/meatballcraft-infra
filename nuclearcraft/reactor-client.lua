@@ -21,6 +21,7 @@ if not component.isAvailable("gpu") then error("No GPU found") end
 local gpu = component.gpu
 local endpoint
 local selectedService
+local discoveredServiceCount
 
 if component.isAvailable("tunnel") then
     endpoint = rpc.tunnel(component.tunnel, PROTOCOL, TIMEOUT)
@@ -29,20 +30,35 @@ else
         error("No Linked Card or Network Card found (missing 'tunnel' and 'modem' components)")
     end
     local modem = component.modem
-    local services, findError = discovery.find(modem, {
+    local services, findError = serviceSelector.discover(discovery, modem, {
         serviceType = SERVICE_TYPE,
         apiVersion = API_VERSION,
-        timeout = DISCOVERY_TIMEOUT
+        timeout = DISCOVERY_TIMEOUT,
+        label = "reactor relay"
     })
-    if not services then error("Could not discover reactor relays: " .. tostring(findError)) end
+    if not services then
+        io.stderr:write("ERROR: ", tostring(findError), "\n")
+        return
+    end
+    discoveredServiceCount = #services
 
-    selectedService = serviceSelector.choose(services, {
+    local selectionError
+    selectedService, selectionError = serviceSelector.choose(services, {
         requested = options.reactor,
         configPath = CONFIG_PATH,
         label = "reactor relay",
         title = "Reactor relays"
     })
-    modem.open(selectedService.servicePort)
+    if not selectedService then
+        io.stderr:write("ERROR: ", tostring(selectionError), "\n")
+        return
+    end
+    local opened, openError = modem.open(selectedService.servicePort)
+    if not opened then
+        io.stderr:write("ERROR: Discovered ", selectedService.displayName, ", but could not open application port ",
+            tostring(selectedService.servicePort), ": ", tostring(openError), "\n")
+        return
+    end
     endpoint = rpc.modemUnicast(modem, selectedService.address, selectedService.servicePort, PROTOCOL, TIMEOUT)
 end
 
@@ -152,18 +168,21 @@ end
 
 local drawAt = ui.draw
 
-local function drawDashboard(response, err)
+local function drawDashboard(response, err, status)
     local width, height = ui.clear()
 
     drawAt(1, 1, "NC REACTOR DASHBOARD", HEADER)
-    if err then
+    if status == "requesting" then
+        drawAt(math.max(1, width - 11), 1, "REQUESTING", WARN)
+    elseif err then
         drawAt(math.max(1, width - #tostring(err) - 6), 1, "ERROR " .. tostring(err), BAD)
     else
         drawAt(math.max(1, width - 8), 1, "CONNECTED", GOOD)
     end
 
     if not response or not response.reactor then
-        drawAt(1, 3, "Waiting for reactor data...", WARN)
+        drawAt(1, 3, status == "requesting" and "Request sent; waiting for reactor response..." or
+            "No valid reactor data received.", WARN)
         return
     end
 
@@ -224,7 +243,7 @@ local function drawDashboard(response, err)
 end
 
 local function dashboard()
-    ui.runDashboard(REFRESH_INTERVAL, function() return request("getAll") end, drawDashboard)
+    ui.runDashboard(REFRESH_INTERVAL, function() return request("getAll") end, drawDashboard, "reactor")
 end
 
 local function showResponse(requestType, builder, field)
@@ -232,7 +251,10 @@ local function showResponse(requestType, builder, field)
 end
 
 local menuTitle = "NC Reactor Monitor"
-if selectedService then menuTitle = menuTitle .. " - " .. selectedService.displayName end
+if selectedService then
+    menuTitle = menuTitle .. " - " .. selectedService.displayName ..
+        string.format(" [%d discovered]", discoveredServiceCount)
+end
 
 ui.runMenu(menuTitle, {
     { key = "1", label = "Reactor summary", action = function()

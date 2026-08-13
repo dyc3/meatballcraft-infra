@@ -47,6 +47,7 @@ package.loaded["meatball.discovery"] = {
     end
 }
 package.loaded["nuclearcraft.service"] = {
+    discover = function(discoveryModule, modem, options) return discoveryModule.find(modem, options) end,
     choose = function(services) return services[1] end
 }
 package.loaded["nuclearcraft.ui"] = {

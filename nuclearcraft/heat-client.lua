@@ -20,20 +20,33 @@ if not component.isAvailable("gpu") then error("No GPU found") end
 
 local modem = component.modem
 local gpu = component.gpu
-local services, findError = discovery.find(modem, {
+local services, findError = serviceSelector.discover(discovery, modem, {
     serviceType = SERVICE_TYPE,
     apiVersion = API_VERSION,
-    timeout = DISCOVERY_TIMEOUT
+    timeout = DISCOVERY_TIMEOUT,
+    label = "heat exchanger"
 })
-if not services then error("Could not discover heat exchangers: " .. tostring(findError)) end
+if not services then
+    io.stderr:write("ERROR: ", tostring(findError), "\n")
+    return
+end
 
-local selectedService = serviceSelector.choose(services, {
+local selectedService, selectionError = serviceSelector.choose(services, {
     requested = options.exchanger,
     configPath = CONFIG_PATH,
     label = "heat exchanger",
     title = "Heat exchangers"
 })
-modem.open(selectedService.servicePort)
+if not selectedService then
+    io.stderr:write("ERROR: ", tostring(selectionError), "\n")
+    return
+end
+local opened, openError = modem.open(selectedService.servicePort)
+if not opened then
+    io.stderr:write("ERROR: Discovered ", selectedService.displayName, ", but could not open application port ",
+        tostring(selectedService.servicePort), ": ", tostring(openError), "\n")
+    return
+end
 
 local endpoint = rpc.modemUnicast(modem, selectedService.address, selectedService.servicePort, PROTOCOL, TIMEOUT)
 local request = endpoint.request
@@ -124,11 +137,13 @@ end
 
 local drawAt = ui.draw
 
-local function drawDashboard(response, err)
+local function drawDashboard(response, err, status)
     local width, height = ui.clear()
 
     drawAt(1, 1, "HEAT EXCHANGER DASHBOARD", HEADER)
-    if err then
+    if status == "requesting" then
+        drawAt(math.max(1, width - 11), 1, "REQUESTING", WARN)
+    elseif err then
         local text = "ERROR " .. tostring(err)
         drawAt(math.max(1, width - #text + 1), 1, text, BAD)
     else
@@ -136,7 +151,8 @@ local function drawDashboard(response, err)
     end
 
     if not response or not response.exchanger then
-        drawAt(1, 3, "Waiting for data...", WARN)
+        drawAt(1, 3, status == "requesting" and "Request sent; waiting for response..." or
+            "No valid heat exchanger data received.", WARN)
         return
     end
 
@@ -188,10 +204,10 @@ local function drawDashboard(response, err)
 end
 
 local function dashboard()
-    ui.runDashboard(REFRESH_INTERVAL, function() return request("getAll") end, drawDashboard)
+    ui.runDashboard(REFRESH_INTERVAL, function() return request("getAll") end, drawDashboard, "exchanger")
 end
 
-ui.runMenu("NC Heat Exchanger - " .. selectedService.displayName, {
+ui.runMenu("NC Heat Exchanger - " .. selectedService.displayName .. string.format(" [%d discovered]", #services), {
     { key = "1", label = "Summary", action = function()
         ui.showResponse(request, "getSummary", buildSummary, "exchanger")
     end },
