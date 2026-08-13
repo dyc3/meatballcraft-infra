@@ -80,14 +80,26 @@ local function add(segments, text, color)
     segments[#segments + 1] = { text = tostring(text), color = color or uiModule.TEXT }
 end
 
+local function fitted(text, width)
+    text = tostring(text)
+    if #text > width then
+        if width <= 1 then return text:sub(1, width) end
+        return text:sub(1, width - 1) .. "~"
+    end
+    return text .. string.rep(" ", width - #text)
+end
+
+local function addField(segments, text, width, color)
+    add(segments, fitted(text, width), color)
+end
+
 local function separator(segments)
     add(segments, " | ", uiModule.MUTED)
 end
 
 local function machineState(segments, active, complete)
-    add(segments, active and "ONLINE" or "OFFLINE", active and uiModule.GOOD or uiModule.WARN)
-    add(segments, " ", uiModule.MUTED)
-    add(segments, complete and "COMPLETE" or "INCOMPLETE", complete and uiModule.GOOD or uiModule.WARN)
+    addField(segments, active and "ONLINE" or "OFFLINE", 8, active and uiModule.GOOD or uiModule.WARN)
+    addField(segments, complete and "COMPLETE" or "INCOMPLETE", 10, complete and uiModule.GOOD or uiModule.WARN)
 end
 
 local function radiationColor(level)
@@ -123,10 +135,10 @@ local function reactorSummary(response)
     machineState(segments, reactor.reactorOn, reactor.complete)
     separator(segments)
     add(segments, "Heat ", uiModule.MUTED)
-    add(segments, heat and uiModule.percentage(heat.percent) or "-", heatColor(heat and heat.percent))
+    addField(segments, heat and uiModule.percentage(heat.percent) or "-", 7, heatColor(heat and heat.percent))
     separator(segments)
     add(segments, "Radiation ", uiModule.MUTED)
-    add(segments, uiModule.metric(radiation and radiation.level, "Rads/t"),
+    addField(segments, uiModule.metric(radiation and radiation.level, "Rads/t"), 15,
         radiationColor(radiation and radiation.level))
     separator(segments)
     add(segments, "Vessels ", uiModule.MUTED)
@@ -143,7 +155,7 @@ local function heatSummary(response)
     machineState(segments, exchanger.active, exchanger.complete)
     separator(segments)
     add(segments, "Efficiency ", uiModule.MUTED)
-    add(segments, efficiency, efficiencyColor(exchanger.efficiency))
+    addField(segments, efficiency, 7, efficiencyColor(exchanger.efficiency))
     separator(segments)
     add(segments, "Tubes ", uiModule.MUTED)
     add(segments, uiModule.number(counts.exchanger), uiModule.INFO)
@@ -159,10 +171,10 @@ local function turbineSummary(response)
     machineState(segments, turbine.active, turbine.complete)
     separator(segments)
     add(segments, "Power ", uiModule.MUTED)
-    add(segments, uiModule.metric(turbine.power, "RF/t"), uiModule.INFO)
+    addField(segments, uiModule.metric(turbine.power, "RF/t"), 12, uiModule.INFO)
     separator(segments)
     add(segments, "Energy ", uiModule.MUTED)
-    add(segments, uiModule.percentage(energy.percent), uiModule.INFO)
+    addField(segments, uiModule.percentage(energy.percent), 7, uiModule.INFO)
     separator(segments)
     add(segments, "Input ", uiModule.MUTED)
     add(segments, uiModule.number(turbine.inputRate) .. " mB/t", uiModule.INFO)
@@ -181,7 +193,7 @@ local function geigerSummary(response)
     add(segments, "ONLINE", uiModule.GOOD)
     separator(segments)
     add(segments, "Radiation ", uiModule.MUTED)
-    add(segments, uiModule.metric(radiation.level, "Rads/t"), radiationColor(radiation.level))
+    addField(segments, uiModule.metric(radiation.level, "Rads/t"), 15, radiationColor(radiation.level))
     return segments
 end
 
@@ -216,6 +228,9 @@ end
 
 local function draw()
     local width, height = ui.clear()
+    local nameWidth = 12
+    for _, record in ipairs(records) do nameWidth = math.max(nameWidth, #record.service.displayName) end
+    nameWidth = math.min(nameWidth, 32, math.max(12, width - 80))
     ui.draw(1, 1, "NC SERVICE DASHBOARD", uiModule.HEADER)
     local connected = countConnected()
     local fleetStatus = string.format("%d/%d RESPONDING", connected, #records)
@@ -276,11 +291,12 @@ local function draw()
                 ui.draw(1, y, "  ", uiModule.TEXT)
                 ui.draw(3, y, indicator, indicatorColor)
                 local x = 7
-                ui.draw(x, y, record.service.displayName, uiModule.TEXT)
-                x = x + #record.service.displayName
+                local displayedName = fitted(record.service.displayName, nameWidth)
+                ui.draw(x, y, displayedName, uiModule.TEXT)
+                x = x + nameWidth
                 if record.service.conflict then
-                    ui.draw(x, y, " [DUPLICATE ID]", uiModule.BAD)
-                    x = x + 15
+                    ui.draw(x, y, "[DUPLICATE] ", uiModule.BAD)
+                    x = x + 12
                 end
                 if record.response then
                     ui.draw(x, y, " | ", uiModule.MUTED)

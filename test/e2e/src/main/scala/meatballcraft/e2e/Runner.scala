@@ -468,7 +468,8 @@ object Runner {
     val turbineServer = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-turbine-server",
       "test/e2e/fixtures/turbine-network-server.lua", Seq.empty, wireless = true, None)
     val nanoGeiger = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-geiger-nano",
-      "test/e2e/fixtures/dashboard-geiger-server.lua", Seq("geiger-nano", "Nano Radiation", "0.000000042"),
+      "test/e2e/fixtures/dashboard-geiger-server.lua",
+      Seq("geiger-nano", "Nano Radiation Monitor With Long Name", "0.000000042"),
       wireless = true, None)
     val microGeiger = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-geiger-micro",
       "test/e2e/fixtures/dashboard-geiger-server.lua", Seq("geiger-micro", "Micro Radiation", "0.00042"),
@@ -494,6 +495,7 @@ object Runner {
     val spinner = new AtomicBoolean(false)
     val granularStateColors = new AtomicBoolean(false)
     val radiationColors = new AtomicBoolean(false)
+    val alignedColumns = new AtomicBoolean(false)
 
     EventBus.subscribe {
       case event: MachineCrashEvent if roles.contains(event.address) =>
@@ -515,7 +517,8 @@ object Runner {
 
     val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
     def complete: Boolean = discovering.get() && discoveryCounts.get() && reactor.get() && heat.get() &&
-      turbine.get() && geiger.get() && spinner.get() && granularStateColors.get() && radiationColors.get()
+      turbine.get() && geiger.get() && spinner.get() && granularStateColors.get() && radiationColors.get() &&
+      alignedColumns.get()
     while (!complete && crash.get() == null && System.nanoTime() < deadline) {
       workspace.update()
       val rendered = renderScreen(dashboard.screen)
@@ -526,19 +529,28 @@ object Runner {
       if (rendered.contains("E2E Turbine") && rendered.contains("12.3 kRF/t")) turbine.set(true)
       if (rendered.contains("42.0 nRads/t") && rendered.contains("420 uRads/t") &&
         rendered.contains("420 mRads/t") && rendered.contains("1.20 Rads/t")) geiger.set(true)
-      granularStateColors.set(
-        textHasForeground(dashboard.screen, "ONLINE", 0x55FF55) &&
+      if (textHasForeground(dashboard.screen, "ONLINE", 0x55FF55) &&
           textHasForeground(dashboard.screen, "COMPLETE", 0x55FF55) &&
           textHasForeground(dashboard.screen, "OFFLINE", 0xFFFF55) &&
           textHasForeground(dashboard.screen, "INCOMPLETE", 0xFFFF55) &&
-          textHasForeground(dashboard.screen, "E2E Reactor", 0xFFFFFF)
-      )
-      radiationColors.set(
-        textHasForeground(dashboard.screen, "1.20 Rads/t", 0xFF5555) &&
+          textHasForeground(dashboard.screen, "E2E Reactor", 0xFFFFFF)) granularStateColors.set(true)
+      if (textHasForeground(dashboard.screen, "1.20 Rads/t", 0xFF5555) &&
           textHasForeground(dashboard.screen, "420 mRads/t", 0xFFAA00) &&
           textHasForeground(dashboard.screen, "420 uRads/t", 0xFFFF55) &&
-          textHasForeground(dashboard.screen, "42.0 nRads/t", 0xFFFFFF)
-      )
+          textHasForeground(dashboard.screen, "42.0 nRads/t", 0xFFFFFF)) radiationColors.set(true)
+      val onlineColumn = textColumn(dashboard.screen, "E2E Reactor", "ONLINE")
+      val offlineColumn = textColumn(dashboard.screen, "E2E Heat Exchanger", "OFFLINE")
+      val completeColumn = textColumn(dashboard.screen, "E2E Reactor", "COMPLETE")
+      val incompleteColumn = textColumn(dashboard.screen, "E2E Heat Exchanger", "INCOMPLETE")
+      val radiationColumns = Seq("Nano Radiation Monitor With Lon~", "Micro Radiation", "Milli Radiation", "High Radiation")
+        .map(name => textColumn(dashboard.screen, name, "| Radiation"))
+      if (
+        onlineColumn >= 0 && onlineColumn == offlineColumn &&
+          completeColumn >= 0 && completeColumn == incompleteColumn &&
+          radiationColumns.forall(_ >= 0) && radiationColumns.distinct.size == 1 &&
+          rendered.contains("Nano Radiation Monitor With Lon~") &&
+          !rendered.contains("Nano Radiation Monitor With Long Name")
+      ) alignedColumns.set(true)
       Thread.sleep(10)
     }
 
@@ -554,7 +566,8 @@ object Runner {
         s"Dashboard did not render the complete fleet (discovering=${discovering.get()}, " +
           s"counts=${discoveryCounts.get()}, reactor=${reactor.get()}, heat=${heat.get()}, " +
           s"turbine=${turbine.get()}, geiger=${geiger.get()}, spinner=${spinner.get()}, " +
-          s"stateColors=${granularStateColors.get()}, radiationColors=${radiationColors.get()})\n$screens"
+          s"stateColors=${granularStateColors.get()}, radiationColors=${radiationColors.get()}, " +
+          s"aligned=${alignedColumns.get()})\n$screens"
       )
     }
     runEmptyDashboard(root, workspaceRoot.resolve("dashboard-empty"), temporaryRoot)
@@ -821,6 +834,11 @@ object Runner {
       }
       matched
     }
+  }
+
+  private def textColumn(screen: Screen, lineMarker: String, text: String): Int = {
+    screen.data.buffer.iterator.map(row => new String(row, 0, row.length))
+      .find(_.contains(lineMarker)).map(_.indexOf(text)).getOrElse(-1)
   }
 
   private def resultReady(path: Path): Boolean = Files.exists(path) && Files.size(path) > 0

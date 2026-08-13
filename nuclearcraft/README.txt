@@ -28,7 +28,9 @@ dashboard.lua
 - Shows one live fleet view with connection state and headline metrics for every
   discovered instance. A failure from one server does not hide healthy servers.
 - Each row uses granular colors for state, structure, labels, and metric values;
-  a per-service spinner appears while its metrics request is in flight.
+  a per-service spinner appears while its metrics request is in flight. Service
+  names, state, structure, and type-specific metrics use aligned columns.
+  Service names longer than the 32-character column are truncated with `~`.
 - Radiation is red at 1 Rads/t and above, orange from 1 mRads/t, yellow from
   1 uRads/t, and white below 1 uRads/t (the nanorads range and smaller).
 - Refreshes metrics every 2 seconds and repeats discovery every 30 seconds.
