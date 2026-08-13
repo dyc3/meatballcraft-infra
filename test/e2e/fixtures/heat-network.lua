@@ -1,0 +1,2 @@
+-- Marker fixture handled by the Scala runner.
+-- It boots the real heat client and a wireless RPC provider on separate computers.

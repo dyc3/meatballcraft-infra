@@ -18,6 +18,7 @@ object Runner {
   private val ResultFile = ".e2e-result"
   private val TimeoutSeconds = 30
   private val ReactorNetworkProgram = "test/e2e/fixtures/reactor-network.lua"
+  private val HeatNetworkProgram = "test/e2e/fixtures/heat-network.lua"
 
   def main(args: Array[String]): Unit = {
     val root = requiredEnvironmentPath("OC_E2E_ROOT")
@@ -39,6 +40,8 @@ object Runner {
       initialized = true
       if (requestedProgram == ReactorNetworkProgram) {
         runReactorNetwork(root, workspaceRoot, temporaryRoot)
+      } else if (requestedProgram == HeatNetworkProgram) {
+        runHeatNetwork(root, workspaceRoot, temporaryRoot)
       } else {
         if (requestedProgram == "test/e2e/fixtures/provision-drive.lua") {
           copyTree(
@@ -280,6 +283,70 @@ object Runner {
           s"count=${zeroCountRendered.get()}, troubleshooting=${troubleshootingRendered.get()})\n$screen"
       )
     }
+  }
+
+  private def runHeatNetwork(root: Path, workspaceRoot: Path, temporaryRoot: Path): Unit = {
+    val workspace = new Workspace(workspaceRoot)
+    val server = createTopologyComputer(root, temporaryRoot, workspace, "heat-server",
+      "test/e2e/fixtures/heat-network-server.lua", Seq.empty, wireless = true, None)
+    val client = createTopologyComputer(root, temporaryRoot, workspace, "heat-client",
+      "nuclearcraft/heat-client.lua", Seq("--exchanger=heat-e2e"), wireless = true, None)
+    val computers = Seq(server, client)
+    val crash = new AtomicReference[String]()
+    val discovered = new AtomicBoolean(false)
+    val requesting = new AtomicBoolean(false)
+    val connected = new AtomicBoolean(false)
+    val heatData = new AtomicBoolean(false)
+    val roles = computers.map(node => node.computer.node.address -> node).toMap
+
+    EventBus.subscribe {
+      case event: MachineCrashEvent if roles.contains(event.address) =>
+        crash.compareAndSet(null, s"${roles(event.address).diskRoot.getFileName}: ${event.message}")
+      case event: TextBufferSetEvent if event.address == client.screen.node.address =>
+        if (event.value.contains("[1 discovered]")) discovered.set(true)
+        if (event.value.contains("REQUESTING") || event.value.contains("Request sent")) requesting.set(true)
+        if (event.value.contains("CONNECTED")) connected.set(true)
+        if (event.value.contains("Efficiency")) heatData.set(true)
+    }
+
+    server.computer.machine.start()
+    pumpWorkspace(workspace, 2500)
+    client.computer.machine.start()
+    val menuDeadline = System.nanoTime() + 10L * 1000000000L
+    while (!renderScreen(client.screen).contains("4. Live dashboard") && crash.get() == null &&
+      System.nanoTime() < menuDeadline) {
+      workspace.update()
+      Thread.sleep(10)
+    }
+    if (!renderScreen(client.screen).contains("4. Live dashboard")) {
+      throw new RuntimeException(s"Heat client did not reach its real menu\n${renderScreen(client.screen)}")
+    }
+
+    val user = User("e2e")
+    client.screen.keyDown('4', 5, user)
+    client.screen.keyUp('4', 5, user)
+    client.screen.keyDown('\r', 28, user)
+    client.screen.keyUp('\r', 28, user)
+
+    val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
+    while (!(discovered.get() && requesting.get() && connected.get() && heatData.get()) && crash.get() == null &&
+      System.nanoTime() < deadline) {
+      workspace.update()
+      Thread.sleep(10)
+    }
+    val screens = computers.zip(Seq("server", "client"))
+      .map { case (node, role) => s"$role ${renderScreen(node.screen)}" }.mkString("\n")
+    computers.foreach(_.computer.machine.stop())
+
+    if (crash.get() != null) {
+      throw new RuntimeException(s"Heat topology crashed: ${crash.get()}\n$screens")
+    } else if (!(discovered.get() && requesting.get() && connected.get() && heatData.get())) {
+      throw new RuntimeException(
+        s"Heat RPC diagnostics/data incomplete (discovered=${discovered.get()}, requesting=${requesting.get()}, " +
+          s"connected=${connected.get()}, data=${heatData.get()})\n$screens"
+      )
+    }
+    println(s"PASS: $HeatNetworkProgram (real 2-computer wireless discovery + heat RPC topology)")
   }
 
   private def runComputer(root: Path, workspaceRoot: Path, diskRoot: Path, program: String): Unit = {
