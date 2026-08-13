@@ -89,6 +89,25 @@ assert(renderedDiscovery:find("Discovering reactor relays", 1, true), "discovery
 assert(renderedDiscovery:find("0 valid reactor relays discovered", 1, true),
     "discovery did not show its result count")
 
+local portOpen = false
+local openedPort, openPortError = serviceSelector.openPort({
+    open = function(port)
+        assert(port == 48722)
+        portOpen = true
+        return nil
+    end,
+    isOpen = function(port) return port == 48722 and portOpen end
+}, 48722)
+assert(openedPort and not openPortError, "nil modem.open result was treated as failure despite the port being open")
+
+local openCalls = 0
+local alreadyOpen, alreadyOpenError = serviceSelector.openPort({
+    open = function() openCalls = openCalls + 1 return false end,
+    isOpen = function(port) return port == 48722 end
+}, 48722)
+assert(alreadyOpen and not alreadyOpenError and openCalls == 0,
+    "an already-open application port was treated as failure or reopened")
+
 local function runServer(program, hasTunnel, serviceType, port)
     local advertised
     local configured
@@ -155,7 +174,10 @@ local function runClient(program, hasTunnel, serviceType, port)
     local selectedAddress
     local selectedPort
     local openedPort
-    local modem = { open = function(value) openedPort = value return true end }
+    local modem = {
+        open = function(value) openedPort = value return true end,
+        isOpen = function(value) return openedPort == value end
+    }
 
     package.loaded.component = {
         gpu = {},
@@ -183,6 +205,7 @@ local function runClient(program, hasTunnel, serviceType, port)
         discover = function(discoveryModule, receivedModem, options)
             return discoveryModule.find(receivedModem, options)
         end,
+        openPort = function(receivedModem, port) return receivedModem.open(port) end,
         choose = function(services, options)
             assert(#services == 1 and options.requested == nil)
             assert(options.configPath and options.label and options.title)

@@ -52,7 +52,7 @@ else
         io.stderr:write("ERROR: ", tostring(selectionError), "\n")
         return
     end
-    local opened, openError = modem.open(selectedService.servicePort)
+    local opened, openError = serviceSelector.openPort(modem, selectedService.servicePort)
     if not opened then
         io.stderr:write("ERROR: Discovered ", selectedService.displayName, ", but could not open application port ",
             tostring(selectedService.servicePort), ": ", tostring(openError), "\n")

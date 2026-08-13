@@ -209,6 +209,7 @@ local function testClientTransport(hasTunnel)
         discover = function(discoveryModule, receivedModem, options)
             return discoveryModule.find(receivedModem, options)
         end,
+        openPort = function(receivedModem, port) return receivedModem.open(port) end,
         choose = function(services) return services[1] end
     }
     package.loaded["nuclearcraft.ui"] = {

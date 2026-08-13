@@ -1,7 +1,7 @@
 package meatballcraft.e2e
 
 import totoro.ocelot.brain.Ocelot
-import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, InternetCard, Keyboard, LinkedCard, Memory, Screen, WirelessNetworkCard}
+import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, InternetCard, Keyboard, LinkedCard, Memory, NetworkCard, Screen, WirelessNetworkCard}
 import totoro.ocelot.brain.event.{EventBus, MachineCrashEvent, TextBufferSetEvent}
 import totoro.ocelot.brain.loot.Loot
 import totoro.ocelot.brain.user.User
@@ -71,7 +71,13 @@ object Runner {
     }
   }
 
-  private case class TopologyComputer(computer: Case, screen: Screen, keyboard: Keyboard, diskRoot: Path)
+  private case class TopologyComputer(
+      computer: Case,
+      screen: Screen,
+      keyboard: Keyboard,
+      diskRoot: Path,
+      networkCard: Option[NetworkCard]
+  )
 
   private def createTopologyComputer(
       root: Path,
@@ -103,7 +109,8 @@ object Runner {
     disk.customRealPath = Some(roleRoot)
     disk.fileSystem.label.setLabel(s"e2e-$role")
     computer.inventory(4) = disk
-    if (wireless) computer.inventory(5) = new WirelessNetworkCard.Tier2()
+    val networkCard = if (wireless) Some(new WirelessNetworkCard.Tier2()) else None
+    networkCard.foreach(card => computer.inventory(5) = card)
     linkedChannel.foreach { channel =>
       val card = new LinkedCard()
       card.tunnel = channel
@@ -112,7 +119,7 @@ object Runner {
     eeprom.volatileData = disk.node.address.getBytes(StandardCharsets.UTF_8)
     computer.connect(screen)
     screen.connect(keyboard)
-    TopologyComputer(computer, screen, keyboard, roleRoot)
+    TopologyComputer(computer, screen, keyboard, roleRoot, networkCard)
   }
 
   private def writeTopologyAutorun(
@@ -291,6 +298,7 @@ object Runner {
       "test/e2e/fixtures/heat-network-server.lua", Seq.empty, wireless = true, None)
     val client = createTopologyComputer(root, temporaryRoot, workspace, "heat-client",
       "nuclearcraft/heat-client.lua", Seq("--exchanger=heat-e2e"), wireless = true, None)
+    client.networkCard.foreach(_.openPorts.add(48722))
     val computers = Seq(server, client)
     val crash = new AtomicReference[String]()
     val discovered = new AtomicBoolean(false)

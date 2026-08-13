@@ -149,6 +149,20 @@ function service.discover(discovery, modem, options)
     return services, nil, diagnostics
 end
 
+function service.openPort(modem, port)
+    local checked, alreadyOpen = pcall(modem.isOpen, port)
+    if checked and alreadyOpen then return true end
+
+    local called, opened, reason = pcall(modem.open, port)
+    if not called then return nil, tostring(opened) end
+
+    local verified, isOpen = pcall(modem.isOpen, port)
+    if verified and isOpen then return true end
+    if reason ~= nil then return nil, tostring(reason) end
+    if opened == false then return nil, "modem refused to open the port" end
+    return nil, "modem did not report the port as open"
+end
+
 function service.choose(services, options)
     options = options or {}
     local label = options.label or "service"
