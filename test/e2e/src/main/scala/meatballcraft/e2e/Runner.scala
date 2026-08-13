@@ -20,6 +20,7 @@ object Runner {
   private val ReactorNetworkProgram = "test/e2e/fixtures/reactor-network.lua"
   private val HeatNetworkProgram = "test/e2e/fixtures/heat-network.lua"
   private val TurbineNetworkProgram = "test/e2e/fixtures/turbine-network.lua"
+  private val DashboardNetworkProgram = "test/e2e/fixtures/dashboard-network.lua"
 
   def main(args: Array[String]): Unit = {
     val root = requiredEnvironmentPath("OC_E2E_ROOT")
@@ -45,6 +46,8 @@ object Runner {
         runHeatNetwork(root, workspaceRoot, temporaryRoot)
       } else if (requestedProgram == TurbineNetworkProgram) {
         runTurbineNetwork(root, workspaceRoot, temporaryRoot)
+      } else if (requestedProgram == DashboardNetworkProgram) {
+        runDashboardNetwork(root, workspaceRoot, temporaryRoot)
       } else {
         if (requestedProgram == "test/e2e/fixtures/provision-drive.lua") {
           copyTree(
@@ -436,6 +439,155 @@ object Runner {
       )
     }
     println(s"PASS: $TurbineNetworkProgram (real client/server entry points over 2-computer wireless topology)")
+  }
+
+  private def runDashboardNetwork(root: Path, workspaceRoot: Path, temporaryRoot: Path): Unit = {
+    val workspace = new Workspace(workspaceRoot)
+    val channel = "meatballcraft-e2e-dashboard-reactor"
+    val reactorServer = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-reactor-server",
+      "test/e2e/fixtures/reactor-network-server.lua", Seq.empty, wireless = false, Some(channel))
+    val reactorRelay = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-reactor-relay",
+      "nuclearcraft/reactor-relay.lua", Seq("--id=reactor-e2e", "--name=E2E Reactor"), wireless = true,
+      Some(channel))
+    val heatServer = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-heat-server",
+      "test/e2e/fixtures/dashboard-heat-server.lua", Seq.empty, wireless = true, None)
+    val turbineServer = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-turbine-server",
+      "test/e2e/fixtures/turbine-network-server.lua", Seq.empty, wireless = true, None)
+    val geigerServer = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-geiger-server",
+      "test/e2e/fixtures/dashboard-geiger-server.lua", Seq.empty, wireless = true, None)
+    val dashboard = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-client",
+      "nuclearcraft/dashboard.lua", Seq.empty, wireless = true, None)
+    val computers = Seq(reactorServer, reactorRelay, heatServer, turbineServer, geigerServer, dashboard)
+    val roles = computers.map(node => node.computer.node.address -> node).toMap
+    val crash = new AtomicReference[String]()
+    val discovering = new AtomicBoolean(false)
+    val discoveryCounts = new AtomicBoolean(false)
+    val reactor = new AtomicBoolean(false)
+    val heat = new AtomicBoolean(false)
+    val turbine = new AtomicBoolean(false)
+    val geiger = new AtomicBoolean(false)
+
+    EventBus.subscribe {
+      case event: MachineCrashEvent if roles.contains(event.address) =>
+        crash.compareAndSet(null, s"${roles(event.address).diskRoot.getFileName}: ${event.message}")
+      case event: TextBufferSetEvent if event.address == dashboard.screen.node.address =>
+        if (event.value.contains("Discovering NuclearCraft services")) discovering.set(true)
+        if (event.value.contains("4 services discovered")) discoveryCounts.set(true)
+        if (event.value.contains("E2E Reactor") && event.value.contains("ONLINE")) reactor.set(true)
+        if (event.value.contains("E2E Heat Exchanger") && event.value.contains("80.0%")) heat.set(true)
+        if (event.value.contains("E2E Turbine") && event.value.contains("12.3 kRF/t")) turbine.set(true)
+        if (event.value.contains("E2E Geiger Counter") && event.value.contains("420 uRads/t")) geiger.set(true)
+    }
+
+    reactorServer.computer.machine.start()
+    pumpWorkspace(workspace, 1500)
+    Seq(reactorRelay, heatServer, turbineServer, geigerServer).foreach { node =>
+      node.computer.machine.start()
+      pumpWorkspace(workspace, 750)
+    }
+    dashboard.computer.machine.start()
+
+    val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
+    def complete: Boolean = discovering.get() && discoveryCounts.get() && reactor.get() && heat.get() &&
+      turbine.get() && geiger.get()
+    while (!complete && crash.get() == null && System.nanoTime() < deadline) {
+      workspace.update()
+      Thread.sleep(10)
+    }
+
+    val screens = computers.zip(Seq("reactor-server", "reactor-relay", "heat-server", "turbine-server",
+      "geiger-server", "dashboard")).map { case (node, role) => s"$role ${renderScreen(node.screen)}" }.mkString("\n")
+    computers.foreach(_.computer.machine.stop())
+
+    if (crash.get() != null) {
+      throw new RuntimeException(s"Dashboard topology crashed: ${crash.get()}\n$screens")
+    } else if (!complete) {
+      throw new RuntimeException(
+        s"Dashboard did not render the complete fleet (discovering=${discovering.get()}, " +
+          s"counts=${discoveryCounts.get()}, reactor=${reactor.get()}, heat=${heat.get()}, " +
+          s"turbine=${turbine.get()}, geiger=${geiger.get()})\n$screens"
+      )
+    }
+    runEmptyDashboard(root, workspaceRoot.resolve("dashboard-empty"), temporaryRoot)
+    runFailingDashboard(root, workspaceRoot.resolve("dashboard-failures"), temporaryRoot)
+    println(s"PASS: $DashboardNetworkProgram (healthy fleet, zero-provider, and isolated RPC failures)")
+  }
+
+  private def runEmptyDashboard(root: Path, workspaceRoot: Path, temporaryRoot: Path): Unit = {
+    Files.createDirectories(workspaceRoot)
+    val workspace = new Workspace(workspaceRoot)
+    val dashboard = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-empty-client",
+      "nuclearcraft/dashboard.lua", Seq.empty, wireless = true, None)
+    val crash = new AtomicReference[String]()
+    val zeroCount = new AtomicBoolean(false)
+    val troubleshooting = new AtomicBoolean(false)
+    EventBus.subscribe {
+      case event: MachineCrashEvent if event.address == dashboard.computer.node.address => crash.set(event.message)
+      case event: TextBufferSetEvent if event.address == dashboard.screen.node.address =>
+        if (event.value.contains("0 services discovered")) zeroCount.set(true)
+        if (event.value.contains("Check servers, wireless range, and discovery port 48700")) troubleshooting.set(true)
+    }
+
+    dashboard.computer.machine.start()
+    val deadline = System.nanoTime() + 15L * 1000000000L
+    while (!(zeroCount.get() && troubleshooting.get()) && crash.get() == null && System.nanoTime() < deadline) {
+      workspace.update()
+      Thread.sleep(10)
+    }
+    val screen = renderScreen(dashboard.screen)
+    dashboard.computer.machine.stop()
+    if (crash.get() != null) {
+      throw new RuntimeException(s"Zero-provider dashboard crashed: ${crash.get()}\n$screen")
+    } else if (!(zeroCount.get() && troubleshooting.get())) {
+      throw new RuntimeException(
+        s"Zero-provider dashboard diagnostics incomplete (count=${zeroCount.get()}, " +
+          s"troubleshooting=${troubleshooting.get()})\n$screen"
+      )
+    }
+  }
+
+  private def runFailingDashboard(root: Path, workspaceRoot: Path, temporaryRoot: Path): Unit = {
+    Files.createDirectories(workspaceRoot)
+    val workspace = new Workspace(workspaceRoot)
+    val provider = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-failure-server",
+      "test/e2e/fixtures/dashboard-failure-server.lua", Seq.empty, wireless = true, None)
+    val dashboard = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-failure-client",
+      "nuclearcraft/dashboard.lua", Seq.empty, wireless = true, None)
+    val computers = Seq(provider, dashboard)
+    val roles = computers.map(node => node.computer.node.address -> node).toMap
+    val crash = new AtomicReference[String]()
+    val timeout = new AtomicBoolean(false)
+    val handlerFailure = new AtomicBoolean(false)
+    val malformed = new AtomicBoolean(false)
+    EventBus.subscribe {
+      case event: MachineCrashEvent if roles.contains(event.address) =>
+        crash.compareAndSet(null, s"${roles(event.address).diskRoot.getFileName}: ${event.message}")
+      case event: TextBufferSetEvent if event.address == dashboard.screen.node.address =>
+        if (event.value.contains("Request sent; no response received")) timeout.set(true)
+        if (event.value.contains("Server error: fixture handler failure")) handlerFailure.set(true)
+        if (event.value.contains("'radiation' data is missing or invalid")) malformed.set(true)
+    }
+
+    provider.computer.machine.start()
+    pumpWorkspace(workspace, 1000)
+    dashboard.computer.machine.start()
+    val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
+    def complete: Boolean = timeout.get() && handlerFailure.get() && malformed.get()
+    while (!complete && crash.get() == null && System.nanoTime() < deadline) {
+      workspace.update()
+      Thread.sleep(10)
+    }
+    val screens = computers.zip(Seq("failure-provider", "dashboard"))
+      .map { case (node, role) => s"$role ${renderScreen(node.screen)}" }.mkString("\n")
+    computers.foreach(_.computer.machine.stop())
+    if (crash.get() != null) {
+      throw new RuntimeException(s"Failure dashboard topology crashed: ${crash.get()}\n$screens")
+    } else if (!complete) {
+      throw new RuntimeException(
+        s"Dashboard failure diagnostics incomplete (timeout=${timeout.get()}, " +
+          s"handler=${handlerFailure.get()}, malformed=${malformed.get()})\n$screens"
+      )
+    }
   }
 
   private def runComputer(root: Path, workspaceRoot: Path, diskRoot: Path, program: String): Unit = {

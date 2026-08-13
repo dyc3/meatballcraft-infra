@@ -9,6 +9,14 @@ Shared libraries
   selected instance ID while rediscovering its current modem address each run.
 - OPPM installs the required libraries with each client or server package.
 
+dashboard.lua
+- Discovers every reactor relay, heat exchanger, turbine, and networked Geiger
+  counter visible on the modem network; no per-service selection is required.
+- Shows one live fleet view with connection state and headline metrics for every
+  discovered instance. A failure from one server does not hide healthy servers.
+- Refreshes metrics every 2 seconds and repeats discovery every 30 seconds.
+  Press r to refresh metrics, d to rediscover, or q to quit.
+
 geiger-server.lua / geiger-client.lua
 - Standalone Geiger counter monitor with no reactor dependency.
 - Uses Linked Cards directly when they are present, without service discovery.
