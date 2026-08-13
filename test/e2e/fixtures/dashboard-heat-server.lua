@@ -1,8 +1,8 @@
 local realComponent = require("component")
 
 local values = {
-    isComplete = true,
-    isHeatExchangerOn = true,
+    isComplete = false,
+    isHeatExchangerOn = false,
     getLengthX = 3,
     getLengthY = 4,
     getLengthZ = 5,

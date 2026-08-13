@@ -1,7 +1,9 @@
 local realComponent = require("component")
+local instanceId, displayName, rawLevel = ...
+local level = assert(tonumber(rawLevel), "dashboard Geiger fixture requires a numeric radiation level")
 
 local geiger = {
-    getChunkRadiationLevel = function() return 0.00042 end
+    getChunkRadiationLevel = function() return level end
 }
 
 package.loaded.component = setmetatable({
@@ -15,4 +17,4 @@ package.loaded.component = setmetatable({
 }, { __index = realComponent })
 
 local server = assert(loadfile("/repo/nuclearcraft/geiger-server.lua"))
-server("--id=geiger-e2e", "--name=E2E Geiger Counter")
+server("--id=" .. tostring(instanceId), "--name=" .. tostring(displayName))

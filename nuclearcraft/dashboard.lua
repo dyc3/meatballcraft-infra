@@ -63,6 +63,8 @@ local discoveryProgress
 local discoveryFinished
 local pollProgress
 local lastPoll
+local spinnerFrame = 1
+local SPINNER = { "|", "/", "-", "\\" }
 
 local function plural(label, count)
     if count == 1 then return label end
@@ -74,52 +76,113 @@ local function elapsed(timestamp)
     return string.format("%.1fs ago", math.max(0, computer.uptime() - timestamp))
 end
 
-local function statusText(record)
-    if record.status == "requesting" then return "REQUESTING", uiModule.WARN end
-    if record.status == "connected" then return "CONNECTED", uiModule.GOOD end
-    if record.status == "error" then return "ERROR", uiModule.BAD end
-    return "WAITING", uiModule.MUTED
+local function add(segments, text, color)
+    segments[#segments + 1] = { text = tostring(text), color = color or uiModule.TEXT }
 end
 
-local function machineState(active, complete, activeLabel)
-    local state = active and (activeLabel or "ONLINE") or "OFFLINE"
-    local structure = complete and "COMPLETE" or "INVALID"
-    return state .. " " .. structure
+local function separator(segments)
+    add(segments, " | ", uiModule.MUTED)
+end
+
+local function machineState(segments, active, complete)
+    add(segments, active and "ONLINE" or "OFFLINE", active and uiModule.GOOD or uiModule.WARN)
+    add(segments, " ", uiModule.MUTED)
+    add(segments, complete and "COMPLETE" or "INCOMPLETE", complete and uiModule.GOOD or uiModule.WARN)
+end
+
+local function radiationColor(level)
+    if type(level) ~= "number" then return uiModule.MUTED end
+    local absolute = math.abs(level)
+    if absolute >= 1 then return uiModule.BAD end
+    if absolute >= 1e-3 then return uiModule.ORANGE end
+    if absolute >= 1e-6 then return uiModule.WARN end
+    return uiModule.TEXT
+end
+
+local function heatColor(percent)
+    if type(percent) ~= "number" then return uiModule.MUTED end
+    if percent >= 90 then return uiModule.BAD end
+    if percent >= 70 then return uiModule.ORANGE end
+    return uiModule.GOOD
+end
+
+local function efficiencyColor(efficiency)
+    if type(efficiency) ~= "number" then return uiModule.MUTED end
+    if efficiency >= 0.8 then return uiModule.GOOD end
+    if efficiency >= 0.5 then return uiModule.WARN end
+    return uiModule.ORANGE
 end
 
 local function reactorSummary(response)
+    local segments = {}
     local reactor = response.reactor
     local heat = reactor.heat
     local radiation = response.radiation
-    local heatText = heat and uiModule.percentage(heat.percent) or "-"
-    local radiationText = uiModule.metric(radiation and radiation.level, "Rads/t")
     local vessels = reactor.counts and uiModule.number(reactor.counts.vessels) or
         (reactor.vessels and uiModule.number(#reactor.vessels) or "-")
-    return machineState(reactor.reactorOn, reactor.complete) .. " | Heat " .. heatText ..
-        " | Radiation " .. radiationText .. " | Vessels " .. vessels
+    machineState(segments, reactor.reactorOn, reactor.complete)
+    separator(segments)
+    add(segments, "Heat ", uiModule.MUTED)
+    add(segments, heat and uiModule.percentage(heat.percent) or "-", heatColor(heat and heat.percent))
+    separator(segments)
+    add(segments, "Radiation ", uiModule.MUTED)
+    add(segments, uiModule.metric(radiation and radiation.level, "Rads/t"),
+        radiationColor(radiation and radiation.level))
+    separator(segments)
+    add(segments, "Vessels ", uiModule.MUTED)
+    add(segments, vessels, uiModule.INFO)
+    return segments
 end
 
 local function heatSummary(response)
+    local segments = {}
     local exchanger = response.exchanger
     local efficiency = type(exchanger.efficiency) == "number" and
         uiModule.percentage(exchanger.efficiency * 100) or "-"
     local counts = exchanger.counts or {}
-    return machineState(exchanger.active, exchanger.complete) .. " | Efficiency " .. efficiency ..
-        " | Tubes " .. uiModule.number(counts.exchanger) .. "/" .. uiModule.number(counts.condensation)
+    machineState(segments, exchanger.active, exchanger.complete)
+    separator(segments)
+    add(segments, "Efficiency ", uiModule.MUTED)
+    add(segments, efficiency, efficiencyColor(exchanger.efficiency))
+    separator(segments)
+    add(segments, "Tubes ", uiModule.MUTED)
+    add(segments, uiModule.number(counts.exchanger), uiModule.INFO)
+    add(segments, "/", uiModule.MUTED)
+    add(segments, uiModule.number(counts.condensation), uiModule.INFO)
+    return segments
 end
 
 local function turbineSummary(response)
+    local segments = {}
     local turbine = response.turbine
     local energy = turbine.energy or {}
-    return machineState(turbine.active, turbine.complete) .. " | Power " ..
-        uiModule.metric(turbine.power, "RF/t") .. " | Energy " .. uiModule.percentage(energy.percent) ..
-        " | Input " .. uiModule.number(turbine.inputRate) .. " mB/t"
+    machineState(segments, turbine.active, turbine.complete)
+    separator(segments)
+    add(segments, "Power ", uiModule.MUTED)
+    add(segments, uiModule.metric(turbine.power, "RF/t"), uiModule.INFO)
+    separator(segments)
+    add(segments, "Energy ", uiModule.MUTED)
+    add(segments, uiModule.percentage(energy.percent), uiModule.INFO)
+    separator(segments)
+    add(segments, "Input ", uiModule.MUTED)
+    add(segments, uiModule.number(turbine.inputRate) .. " mB/t", uiModule.INFO)
+    return segments
 end
 
 local function geigerSummary(response)
+    local segments = {}
     local radiation = response.radiation
-    if radiation.level == nil then return "UNAVAILABLE | " .. tostring(radiation.error or "No reading") end
-    return "ONLINE | Radiation " .. uiModule.metric(radiation.level, "Rads/t")
+    if radiation.level == nil then
+        add(segments, "UNAVAILABLE", uiModule.WARN)
+        separator(segments)
+        add(segments, tostring(radiation.error or "No reading"), uiModule.BAD)
+        return segments
+    end
+    add(segments, "ONLINE", uiModule.GOOD)
+    separator(segments)
+    add(segments, "Radiation ", uiModule.MUTED)
+    add(segments, uiModule.metric(radiation.level, "Rads/t"), radiationColor(radiation.level))
+    return segments
 end
 
 local SUMMARIES = {
@@ -135,6 +198,20 @@ local function countConnected()
         if record.status == "connected" then connected = connected + 1 end
     end
     return connected
+end
+
+local function drawSegments(x, y, segments)
+    for _, segment in ipairs(segments) do
+        ui.draw(x, y, segment.text, segment.color)
+        x = x + #segment.text
+    end
+end
+
+local function recordIndicator(record)
+    if record.status == "requesting" then return "[" .. SPINNER[spinnerFrame] .. "]", uiModule.WARN end
+    if record.status == "error" then return "[!]", uiModule.BAD end
+    if record.status == "connected" then return "[+]", uiModule.GOOD end
+    return "[ ]", uiModule.MUTED
 end
 
 local function draw()
@@ -167,9 +244,7 @@ local function draw()
     ui.draw(1, 4, table.concat(counts, " | ") .. string.format(" | offers %d received, %d rejected",
         offersReceived, offersRejected), uiModule.MUTED)
 
-    local requestText = pollProgress and ("Requesting metrics from " .. pollProgress .. "...") or
-        ("Metrics updated " .. elapsed(lastPoll))
-    ui.draw(1, 5, requestText, pollProgress and uiModule.WARN or uiModule.MUTED)
+    ui.draw(1, 5, "Metrics updated " .. elapsed(lastPoll), uiModule.MUTED)
 
     local y = 7
     if not discoveryProgress and #records == 0 then
@@ -197,10 +272,22 @@ local function draw()
         else
             for _, record in ipairs(kindRecords) do
                 if y >= height then break end
-                local status, color = statusText(record)
-                local details = record.response and SUMMARIES[kind.key](record.response) or status
-                local conflict = record.service.conflict and " [DUPLICATE ID]" or ""
-                ui.draw(1, y, "  " .. record.service.displayName .. conflict .. " | " .. details, color)
+                local indicator, indicatorColor = recordIndicator(record)
+                ui.draw(1, y, "  ", uiModule.TEXT)
+                ui.draw(3, y, indicator, indicatorColor)
+                local x = 7
+                ui.draw(x, y, record.service.displayName, uiModule.TEXT)
+                x = x + #record.service.displayName
+                if record.service.conflict then
+                    ui.draw(x, y, " [DUPLICATE ID]", uiModule.BAD)
+                    x = x + 15
+                end
+                if record.response then
+                    ui.draw(x, y, " | ", uiModule.MUTED)
+                    drawSegments(x + 3, y, SUMMARIES[kind.key](record.response))
+                elseif record.status == "waiting" then
+                    ui.draw(x, y, " | Waiting for first reading", uiModule.MUTED)
+                end
                 y = y + 1
                 if record.error and y < height then
                     ui.draw(3, y, "ERROR: " .. record.error, uiModule.BAD)
@@ -263,11 +350,20 @@ end
 local function requestRecord(record)
     record.status = "requesting"
     record.error = nil
-    pollProgress = record.service.displayName
+    pollProgress = record
+    spinnerFrame = 1
     draw()
+
+    local spinnerTimer = event.timer(0.2, function()
+        if pollProgress == record then
+            spinnerFrame = spinnerFrame % #SPINNER + 1
+            draw()
+        end
+    end, math.huge)
 
     local opened, openError = service.openPort(modem, record.service.servicePort)
     if not opened then
+        event.cancel(spinnerTimer)
         record.status = "error"
         record.error = "Could not open port " .. tostring(record.service.servicePort) .. ": " .. tostring(openError)
         return
@@ -276,6 +372,7 @@ local function requestRecord(record)
     local endpoint = rpc.modemUnicast(modem, record.service.address, record.service.servicePort,
         record.kind.protocol, REQUEST_TIMEOUT)
     local response, requestError = endpoint.request(record.kind.requestType)
+    event.cancel(spinnerTimer)
     if not response then
         record.status = "error"
         record.error = tostring(requestError)

@@ -5,7 +5,7 @@ import totoro.ocelot.brain.entity.{CPU, Case, GraphicsCard, HDDManaged, Internet
 import totoro.ocelot.brain.event.{EventBus, MachineCrashEvent, TextBufferSetEvent}
 import totoro.ocelot.brain.loot.Loot
 import totoro.ocelot.brain.user.User
-import totoro.ocelot.brain.util.{ExtendedTier, Tier}
+import totoro.ocelot.brain.util.{ExtendedTier, PackedColor, Tier}
 import totoro.ocelot.brain.workspace.Workspace
 
 import java.nio.charset.StandardCharsets
@@ -467,11 +467,22 @@ object Runner {
       "test/e2e/fixtures/dashboard-heat-server.lua", Seq.empty, wireless = true, None)
     val turbineServer = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-turbine-server",
       "test/e2e/fixtures/turbine-network-server.lua", Seq.empty, wireless = true, None)
-    val geigerServer = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-geiger-server",
-      "test/e2e/fixtures/dashboard-geiger-server.lua", Seq.empty, wireless = true, None)
+    val nanoGeiger = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-geiger-nano",
+      "test/e2e/fixtures/dashboard-geiger-server.lua", Seq("geiger-nano", "Nano Radiation", "0.000000042"),
+      wireless = true, None)
+    val microGeiger = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-geiger-micro",
+      "test/e2e/fixtures/dashboard-geiger-server.lua", Seq("geiger-micro", "Micro Radiation", "0.00042"),
+      wireless = true, None)
+    val milliGeiger = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-geiger-milli",
+      "test/e2e/fixtures/dashboard-geiger-server.lua", Seq("geiger-milli", "Milli Radiation", "0.42"),
+      wireless = true, None)
+    val highGeiger = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-geiger-high",
+      "test/e2e/fixtures/dashboard-geiger-server.lua", Seq("geiger-high", "High Radiation", "1.2"),
+      wireless = true, None)
     val dashboard = createTopologyComputer(root, temporaryRoot, workspace, "dashboard-client",
       "nuclearcraft/dashboard.lua", Seq.empty, wireless = true, None)
-    val computers = Seq(reactorServer, reactorRelay, heatServer, turbineServer, geigerServer, dashboard)
+    val providers = Seq(reactorRelay, heatServer, turbineServer, nanoGeiger, microGeiger, milliGeiger, highGeiger)
+    val computers = Seq(reactorServer) ++ providers ++ Seq(dashboard)
     val roles = computers.map(node => node.computer.node.address -> node).toMap
     val crash = new AtomicReference[String]()
     val discovering = new AtomicBoolean(false)
@@ -480,22 +491,23 @@ object Runner {
     val heat = new AtomicBoolean(false)
     val turbine = new AtomicBoolean(false)
     val geiger = new AtomicBoolean(false)
+    val spinner = new AtomicBoolean(false)
+    val granularStateColors = new AtomicBoolean(false)
+    val radiationColors = new AtomicBoolean(false)
 
     EventBus.subscribe {
       case event: MachineCrashEvent if roles.contains(event.address) =>
         crash.compareAndSet(null, s"${roles(event.address).diskRoot.getFileName}: ${event.message}")
       case event: TextBufferSetEvent if event.address == dashboard.screen.node.address =>
         if (event.value.contains("Discovering NuclearCraft services")) discovering.set(true)
-        if (event.value.contains("4 services discovered")) discoveryCounts.set(true)
-        if (event.value.contains("E2E Reactor") && event.value.contains("ONLINE")) reactor.set(true)
-        if (event.value.contains("E2E Heat Exchanger") && event.value.contains("80.0%")) heat.set(true)
-        if (event.value.contains("E2E Turbine") && event.value.contains("12.3 kRF/t")) turbine.set(true)
-        if (event.value.contains("E2E Geiger Counter") && event.value.contains("420 uRads/t")) geiger.set(true)
+        if (event.value == "[|]" || event.value == "[/]" || event.value == "[-]" || event.value == "[\\]") {
+          spinner.set(true)
+        }
     }
 
     reactorServer.computer.machine.start()
     pumpWorkspace(workspace, 1500)
-    Seq(reactorRelay, heatServer, turbineServer, geigerServer).foreach { node =>
+    providers.foreach { node =>
       node.computer.machine.start()
       pumpWorkspace(workspace, 750)
     }
@@ -503,14 +515,36 @@ object Runner {
 
     val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
     def complete: Boolean = discovering.get() && discoveryCounts.get() && reactor.get() && heat.get() &&
-      turbine.get() && geiger.get()
+      turbine.get() && geiger.get() && spinner.get() && granularStateColors.get() && radiationColors.get()
     while (!complete && crash.get() == null && System.nanoTime() < deadline) {
       workspace.update()
+      val rendered = renderScreen(dashboard.screen)
+      if (rendered.contains("7 services discovered")) discoveryCounts.set(true)
+      if (rendered.contains("E2E Reactor") && rendered.contains("ONLINE") && rendered.contains("COMPLETE")) reactor.set(true)
+      if (rendered.contains("E2E Heat Exchanger") && rendered.contains("80.0%") &&
+        rendered.contains("OFFLINE") && rendered.contains("INCOMPLETE")) heat.set(true)
+      if (rendered.contains("E2E Turbine") && rendered.contains("12.3 kRF/t")) turbine.set(true)
+      if (rendered.contains("42.0 nRads/t") && rendered.contains("420 uRads/t") &&
+        rendered.contains("420 mRads/t") && rendered.contains("1.20 Rads/t")) geiger.set(true)
+      granularStateColors.set(
+        textHasForeground(dashboard.screen, "ONLINE", 0x55FF55) &&
+          textHasForeground(dashboard.screen, "COMPLETE", 0x55FF55) &&
+          textHasForeground(dashboard.screen, "OFFLINE", 0xFFFF55) &&
+          textHasForeground(dashboard.screen, "INCOMPLETE", 0xFFFF55) &&
+          textHasForeground(dashboard.screen, "E2E Reactor", 0xFFFFFF)
+      )
+      radiationColors.set(
+        textHasForeground(dashboard.screen, "1.20 Rads/t", 0xFF5555) &&
+          textHasForeground(dashboard.screen, "420 mRads/t", 0xFFAA00) &&
+          textHasForeground(dashboard.screen, "420 uRads/t", 0xFFFF55) &&
+          textHasForeground(dashboard.screen, "42.0 nRads/t", 0xFFFFFF)
+      )
       Thread.sleep(10)
     }
 
-    val screens = computers.zip(Seq("reactor-server", "reactor-relay", "heat-server", "turbine-server",
-      "geiger-server", "dashboard")).map { case (node, role) => s"$role ${renderScreen(node.screen)}" }.mkString("\n")
+    val rolesInOrder = Seq("reactor-server", "reactor-relay", "heat-server", "turbine-server", "nano-geiger",
+      "micro-geiger", "milli-geiger", "high-geiger", "dashboard")
+    val screens = computers.zip(rolesInOrder).map { case (node, role) => s"$role ${renderScreen(node.screen)}" }.mkString("\n")
     computers.foreach(_.computer.machine.stop())
 
     if (crash.get() != null) {
@@ -519,7 +553,8 @@ object Runner {
       throw new RuntimeException(
         s"Dashboard did not render the complete fleet (discovering=${discovering.get()}, " +
           s"counts=${discoveryCounts.get()}, reactor=${reactor.get()}, heat=${heat.get()}, " +
-          s"turbine=${turbine.get()}, geiger=${geiger.get()})\n$screens"
+          s"turbine=${turbine.get()}, geiger=${geiger.get()}, spinner=${spinner.get()}, " +
+          s"stateColors=${granularStateColors.get()}, radiationColors=${radiationColors.get()})\n$screens"
       )
     }
     runEmptyDashboard(root, workspaceRoot.resolve("dashboard-empty"), temporaryRoot)
@@ -770,6 +805,22 @@ object Runner {
     val lines = screen.data.buffer.map(row => new String(row, 0, row.length).stripTrailing())
     val visible = lines.dropWhile(_.isBlank).reverse.dropWhile(_.isBlank).reverse
     if (visible.isEmpty) "" else visible.mkString("Emulated screen:\n", "\n", "")
+  }
+
+  private def textHasForeground(screen: Screen, text: String, expected: Int): Boolean = {
+    val format = screen.data.format
+    val normalizedExpected = format.inflate(format.deflate(PackedColor.Color(expected)) & 0xFF)
+    screen.data.buffer.indices.exists { row =>
+      val rendered = new String(screen.data.buffer(row), 0, screen.data.buffer(row).length)
+      var index = rendered.indexOf(text)
+      var matched = false
+      while (index >= 0 && !matched) {
+        val actual = PackedColor.unpackForeground(screen.data.color(row)(index), format)
+        matched = actual == normalizedExpected
+        index = rendered.indexOf(text, index + 1)
+      }
+      matched
+    }
   }
 
   private def resultReady(path: Path): Boolean = Files.exists(path) && Files.size(path) > 0

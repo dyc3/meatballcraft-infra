@@ -9,6 +9,8 @@ local ui = {
     HEADER = 0x55FFFF,
     GOOD = 0x55FF55,
     WARN = 0xFFFF55,
+    ORANGE = 0xFFAA00,
+    INFO = 0x55AAFF,
     BAD = 0xFF5555
 }
 
