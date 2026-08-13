@@ -1,0 +1,2 @@
+-- Marker fixture handled by the Scala runner.
+-- It boots the real turbine client and server on separate wireless computers.

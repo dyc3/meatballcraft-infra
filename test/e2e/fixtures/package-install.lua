@@ -11,6 +11,14 @@ local manifestFile = assert(io.open(mount .. "/repo/programs.cfg", "r"))
 local manifest = assert(serialization.unserialize(manifestFile:read("*a")))
 manifestFile:close()
 
+for name, info in pairs(manifest) do
+    assert(type(info.files) == "table", name .. " package has no files table")
+    for source in pairs(info.files) do
+        local relativeSource = assert(source:match("^master/(.+)$"), name .. " source is not on master: " .. source)
+        assert(filesystem.exists(mount .. "/repo/" .. relativeSource), name .. " source does not exist: " .. source)
+    end
+end
+
 local packageName = "nc-reactor-client"
 local packageInfo = assert(manifest[packageName], "reactor client package is missing")
 local installRoot = "/tmp/package-install"

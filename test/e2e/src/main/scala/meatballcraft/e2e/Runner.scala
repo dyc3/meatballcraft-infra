@@ -19,6 +19,7 @@ object Runner {
   private val TimeoutSeconds = 30
   private val ReactorNetworkProgram = "test/e2e/fixtures/reactor-network.lua"
   private val HeatNetworkProgram = "test/e2e/fixtures/heat-network.lua"
+  private val TurbineNetworkProgram = "test/e2e/fixtures/turbine-network.lua"
 
   def main(args: Array[String]): Unit = {
     val root = requiredEnvironmentPath("OC_E2E_ROOT")
@@ -42,6 +43,8 @@ object Runner {
         runReactorNetwork(root, workspaceRoot, temporaryRoot)
       } else if (requestedProgram == HeatNetworkProgram) {
         runHeatNetwork(root, workspaceRoot, temporaryRoot)
+      } else if (requestedProgram == TurbineNetworkProgram) {
+        runTurbineNetwork(root, workspaceRoot, temporaryRoot)
       } else {
         if (requestedProgram == "test/e2e/fixtures/provision-drive.lua") {
           copyTree(
@@ -355,6 +358,84 @@ object Runner {
       )
     }
     println(s"PASS: $HeatNetworkProgram (real 2-computer wireless discovery + heat RPC topology)")
+  }
+
+  private def runTurbineNetwork(root: Path, workspaceRoot: Path, temporaryRoot: Path): Unit = {
+    val workspace = new Workspace(workspaceRoot)
+    val server = createTopologyComputer(root, temporaryRoot, workspace, "turbine-server",
+      "test/e2e/fixtures/turbine-network-server.lua", Seq.empty, wireless = true, None)
+    val client = createTopologyComputer(root, temporaryRoot, workspace, "turbine-client",
+      "nuclearcraft/turbine-client.lua", Seq("--turbine=turbine-e2e"), wireless = true, None)
+    val computers = Seq(server, client)
+    val crash = new AtomicReference[String]()
+    val discovered = new AtomicBoolean(false)
+    val requesting = new AtomicBoolean(false)
+    val connected = new AtomicBoolean(false)
+    val turbineData = new AtomicBoolean(false)
+    val coilData = new AtomicBoolean(false)
+    val energyData = new AtomicBoolean(false)
+    val inputData = new AtomicBoolean(false)
+    val flowData = new AtomicBoolean(false)
+    val stageData = new AtomicBoolean(false)
+    val roles = computers.map(node => node.computer.node.address -> node).toMap
+
+    EventBus.subscribe {
+      case event: MachineCrashEvent if roles.contains(event.address) =>
+        crash.compareAndSet(null, s"${roles(event.address).diskRoot.getFileName}: ${event.message}")
+      case event: TextBufferSetEvent if event.address == client.screen.node.address =>
+        if (event.value.contains("[1 discovered]")) discovered.set(true)
+        if (event.value.contains("REQUESTING") || event.value.contains("Request sent")) requesting.set(true)
+        if (event.value.contains("CONNECTED")) connected.set(true)
+        if (event.value.contains("Power: 12.3 kRF/t")) turbineData.set(true)
+        if (event.value.contains("Coils: 2") && event.value.contains("Connectors: 1")) coilData.set(true)
+        if (event.value.contains("Energy: 75.0%")) energyData.set(true)
+        if (event.value.contains("Input: 400 mB/t")) inputData.set(true)
+        if (event.value.contains("Flow: EAST")) flowData.set(true)
+        if (event.value.contains("expansion 1.80/2.0") && event.value.contains("efficiency 80.0%")) stageData.set(true)
+    }
+
+    server.computer.machine.start()
+    pumpWorkspace(workspace, 2500)
+    client.computer.machine.start()
+    val menuDeadline = System.nanoTime() + 10L * 1000000000L
+    while (!renderScreen(client.screen).contains("2. Live dashboard") && crash.get() == null &&
+      System.nanoTime() < menuDeadline) {
+      workspace.update()
+      Thread.sleep(10)
+    }
+    if (!renderScreen(client.screen).contains("2. Live dashboard")) {
+      throw new RuntimeException(s"Turbine client did not reach its real menu\n${renderScreen(client.screen)}")
+    }
+
+    val user = User("e2e")
+    client.screen.keyDown('2', 3, user)
+    client.screen.keyUp('2', 3, user)
+    client.screen.keyDown('\r', 28, user)
+    client.screen.keyUp('\r', 28, user)
+
+    val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
+    def receivedTurbineData: Boolean = discovered.get() && requesting.get() && connected.get() &&
+      turbineData.get() && coilData.get() && energyData.get() && inputData.get() && flowData.get() && stageData.get()
+    while (!receivedTurbineData &&
+      crash.get() == null && System.nanoTime() < deadline) {
+      workspace.update()
+      Thread.sleep(10)
+    }
+    val screens = computers.zip(Seq("server", "client"))
+      .map { case (node, role) => s"$role ${renderScreen(node.screen)}" }.mkString("\n")
+    computers.foreach(_.computer.machine.stop())
+
+    if (crash.get() != null) {
+      throw new RuntimeException(s"Turbine topology crashed: ${crash.get()}\n$screens")
+    } else if (!receivedTurbineData) {
+      throw new RuntimeException(
+        s"Turbine RPC diagnostics/data incomplete (discovered=${discovered.get()}, requesting=${requesting.get()}, " +
+          s"connected=${connected.get()}, power=${turbineData.get()}, coils=${coilData.get()}, " +
+          s"energy=${energyData.get()}, input=${inputData.get()}, flow=${flowData.get()}, " +
+          s"stages=${stageData.get()})\n$screens"
+      )
+    }
+    println(s"PASS: $TurbineNetworkProgram (real client/server entry points over 2-computer wireless topology)")
   }
 
   private def runComputer(root: Path, workspaceRoot: Path, diskRoot: Path, program: String): Unit = {

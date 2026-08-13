@@ -119,8 +119,9 @@ local function runServer(program, hasTunnel, serviceType, port)
         tunnel = hasTunnel and {} or nil,
         nc_geiger_counter = program == "geiger-server.lua" and {} or nil,
         nc_heat_exchanger = program == "heat-server.lua" and {} or nil,
+        nc_turbine = program == "turbine-server.lua" and {} or nil,
         isAvailable = function(name)
-            return name == "nc_geiger_counter" or name == "nc_heat_exchanger" or
+            return name == "nc_geiger_counter" or name == "nc_heat_exchanger" or name == "nc_turbine" or
                 (name == "tunnel" and hasTunnel) or (name == "modem" and not hasTunnel)
         end
     }
@@ -245,8 +246,10 @@ end
 
 runServer("geiger-server.lua", true, "meatballcraft.nc.geiger", 48721)
 runServer("heat-server.lua", false, "meatballcraft.nc.heat-exchanger", 48722)
+runServer("turbine-server.lua", false, "meatballcraft.nc.turbine", 48724)
 runServer("geiger-server.lua", false, "meatballcraft.nc.geiger", 48721)
 runClient("heat-client.lua", false, "meatballcraft.nc.heat-exchanger", 48722)
+runClient("turbine-client.lua", false, "meatballcraft.nc.turbine", 48724)
 runClient("geiger-client.lua", true, "meatballcraft.nc.geiger", 48721)
 runClient("geiger-client.lua", false, "meatballcraft.nc.geiger", 48721)
 
@@ -287,6 +290,7 @@ end
 
 runClientWithNoServices("reactor-client.lua")
 runClientWithNoServices("heat-client.lua")
+runClientWithNoServices("turbine-client.lua")
 runClientWithNoServices("geiger-client.lua")
 
 print("NuclearCraft service discovery integration test complete")

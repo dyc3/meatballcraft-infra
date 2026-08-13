@@ -53,3 +53,14 @@ heat-server.lua / heat-client.lua
 - Server interprets getExchangerTubeStats() and getCondensationTubeStats().
 - Client has compact scrollable views and a live auto-refresh dashboard.
 - Client/server check component.isAvailable("modem") before accessing component.modem.
+
+turbine-server.lua / turbine-client.lua
+- NuclearCraft turbine using normal OpenComputers Network Cards.
+- On first launch, the server asks for a stable ID and display name, then saves
+  them in /etc/nuclearcraft/turbine-server.cfg.
+- CLI values override and update the saved configuration, for example:
+    turbine-server --id=turbine-east --name="East Turbine"
+- Clients discover named servers and then use unicast RPC on port 48724.
+- Pass --turbine=INSTANCE to the client for non-interactive selection.
+- Displays structure and processing state, power, stored energy, fluid input,
+  flow, expansion, blade-stage efficiency, and dynamo-coil validity.
