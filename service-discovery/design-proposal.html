@@ -512,7 +512,7 @@ end</code></pre>
           <li><strong>Package the discovery module.</strong> Add <code>meatball.discovery</code> as a shared library and list it in the relevant OPPM packages.</li>
           <li><strong>Name each relay.</strong> Store an operator-selected <code>instanceId</code> and <code>displayName</code> in a small configuration file or command-line arguments.</li>
           <li><strong>Advertise at the relay.</strong> Each relay offers <code>meatballcraft.nc.reactor</code>, API version <code>1</code>, and its existing application port.</li>
-          <li><strong>Add a fallback picker.</strong> Only when no Linked Card is available, discover for a full collection window and show all relays. Automatically reconnect to the last selected instance ID when it is uniquely present.</li>
+          <li><strong>Add a fallback picker.</strong> Only when no Linked Card is available, discover for a full collection window and show all relays. Prompt whenever multiple relays are present unless the user explicitly requests an instance ID.</li>
           <li><strong>Unicast RPC.</strong> Extend the modem RPC client to accept the selected remote address instead of broadcasting application requests.</li>
           <li><strong>Correlate application calls.</strong> Add RPC request IDs so delayed or unrelated responses cannot satisfy the next call. This is adjacent to discovery, but essential for robust multi-client behavior.</li>
         </ol>

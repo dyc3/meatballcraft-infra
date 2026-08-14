@@ -11,7 +11,6 @@ local REFRESH_INTERVAL = 2
 local SERVICE_TYPE = "meatballcraft.nc.heat-exchanger"
 local API_VERSION = 1
 local DISCOVERY_TIMEOUT = 1
-local CONFIG_PATH = "/etc/nuclearcraft/heat-client.cfg"
 
 local _, options = shell.parse(...)
 
@@ -33,7 +32,6 @@ end
 
 local selectedService, selectionError = serviceSelector.choose(services, {
     requested = options.exchanger,
-    configPath = CONFIG_PATH,
     label = "heat exchanger",
     title = "Heat exchangers"
 })

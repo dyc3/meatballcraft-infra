@@ -64,6 +64,20 @@ local duplicateSelection, duplicateError = serviceSelector.choose({
 assert(not duplicateSelection and tostring(duplicateError):find("duplicated", 1, true),
     "service selector silently chose a duplicated requested identity")
 
+local savedRead = io.read
+local selectionPrompts = 0
+io.read = function()
+    selectionPrompts = selectionPrompts + 1
+    return "2"
+end
+local multipleSelection = serviceSelector.choose({
+    { instanceId = "first", displayName = "First", address = "first", servicePort = 1 },
+    { instanceId = "second", displayName = "Second", address = "second", servicePort = 1 }
+}, { label = "test service" })
+io.read = savedRead
+assert(multipleSelection.instanceId == "second" and selectionPrompts == 1,
+    "service selector did not prompt when multiple services were discovered")
+
 local discoveryOutput = {}
 local savedPrint = print
 print = function(...)
@@ -209,7 +223,8 @@ local function runClient(program, hasTunnel, serviceType, port)
         openPort = function(receivedModem, port) return receivedModem.open(port) end,
         choose = function(services, options)
             assert(#services == 1 and options.requested == nil)
-            assert(options.configPath and options.label and options.title)
+            assert(options.configPath == nil, program .. " persisted its service selection")
+            assert(options.label and options.title)
             return services[1]
         end
     }

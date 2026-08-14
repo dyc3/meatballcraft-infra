@@ -5,8 +5,8 @@ Shared libraries
   dashboard refresh loop, drawing, and response handling.
 - nuclearcraft.rpc provides linked-card and modem endpoints for serialized
   request/response traffic.
-- nuclearcraft.service provides named-service selection and remembers the
-  selected instance ID while rediscovering its current modem address each run.
+- nuclearcraft.service provides named-service selection from current discovery
+  results. Clients prompt whenever multiple matching services are discovered.
 - OPPM resolves the required libraries when installing each client or server package.
 - OPPM installs shared modules through the nc-common and meatball-discovery
   dependency packages. Executable packages do not duplicate ownership of files
@@ -58,7 +58,7 @@ reactor-server.lua / reactor-relay.lua / reactor-client.lua
 - CLI values override and update the saved configuration, for example:
     reactor-relay --id=reactor-north --name="North Salt Reactor"
 - The client uses a direct Linked Card immediately when present. Otherwise it
-  discovers named relays over a Network Card, remembers the selected identity,
+  discovers named relays over a Network Card, selects from the current results,
   and sends subsequent RPC requests directly to that relay's modem address.
 - Pass --reactor=INSTANCE to the client to select a relay non-interactively.
 - Port: 48723

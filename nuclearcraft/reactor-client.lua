@@ -12,7 +12,6 @@ local REFRESH_INTERVAL = 2
 local SERVICE_TYPE = "meatballcraft.nc.reactor"
 local API_VERSION = 1
 local DISCOVERY_TIMEOUT = 1
-local CONFIG_PATH = "/etc/nuclearcraft/reactor-client.cfg"
 
 local _, options = shell.parse(...)
 
@@ -45,7 +44,6 @@ else
     local selectionError
     selectedService, selectionError = serviceSelector.choose(services, {
         requested = options.reactor,
-        configPath = CONFIG_PATH,
         label = "reactor relay",
         title = "Reactor relays"
     })

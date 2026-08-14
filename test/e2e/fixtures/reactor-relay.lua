@@ -210,7 +210,10 @@ local function testClientTransport(hasTunnel)
             return discoveryModule.find(receivedModem, options)
         end,
         openPort = function(receivedModem, port) return receivedModem.open(port) end,
-        choose = function(services) return services[1] end
+        choose = function(services, options)
+            assert(options.configPath == nil, "reactor client persisted its relay selection")
+            return services[1]
+        end
     }
     package.loaded["nuclearcraft.ui"] = {
         new = function()

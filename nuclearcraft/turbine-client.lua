@@ -11,7 +11,6 @@ local REFRESH_INTERVAL = 2
 local SERVICE_TYPE = "meatballcraft.nc.turbine"
 local API_VERSION = 1
 local DISCOVERY_TIMEOUT = 1
-local CONFIG_PATH = "/etc/nuclearcraft/turbine-client.cfg"
 
 local _, options = shell.parse(...)
 
@@ -32,7 +31,6 @@ end
 
 local selectedService, selectionError = serviceSelector.choose(services, {
     requested = options.turbine,
-    configPath = CONFIG_PATH,
     label = "turbine",
     title = "Turbines"
 })

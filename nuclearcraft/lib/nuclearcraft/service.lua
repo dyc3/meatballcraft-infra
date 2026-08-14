@@ -34,15 +34,6 @@ local function saveConfig(path, config)
     return true
 end
 
-local function loadPreferredInstance(path)
-    local config = loadConfig(path)
-    if type(config.instanceId) == "string" then return config.instanceId end
-end
-
-local function savePreferredInstance(path, instanceId)
-    return saveConfig(path, { instanceId = instanceId })
-end
-
 local function nonEmpty(value)
     return type(value) == "string" and value:find("%S") ~= nil
 end
@@ -78,7 +69,7 @@ function service.configure(options)
         local title = options.title or "Service discovery setup"
         print(title)
         print(string.rep("=", #title))
-        print("Choose a stable ID. Clients remember this ID across server restarts.")
+        print("Choose a stable ID so clients can identify this service during discovery.")
         instanceId = promptRequired("Service ID: ")
     end
 
@@ -170,8 +161,7 @@ function service.choose(services, options)
         return nil, "No " .. plural(label, 2) .. " found on the modem network"
     end
 
-    local preferred = options.requested or loadPreferredInstance(options.configPath)
-    local matched, matchCount = matchingInstance(services, preferred)
+    local matched, matchCount = matchingInstance(services, options.requested)
     local selected
 
     if matchCount == 1 then
@@ -198,8 +188,6 @@ function service.choose(services, options)
         end
     end
 
-    local saved, reason = savePreferredInstance(options.configPath, selected.instanceId)
-    if not saved then io.stderr:write("Warning: could not save ", label, " selection: ", tostring(reason), "\n") end
     return selected
 end
 
