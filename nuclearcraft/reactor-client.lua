@@ -77,6 +77,16 @@ local add = ui.add
 local blank = ui.blank
 local header = ui.header
 
+local function failsafeMessage(failsafe)
+    local at = type(failsafe.heatPercent) == "number" and
+        string.format(" at %.1f%% heat", failsafe.heatPercent) or ""
+    if failsafe.deactivated == false then
+        local detail = failsafe.error and ": " .. tostring(failsafe.error) or ""
+        return "FAILSAFE TRIGGERED" .. at .. " - DEACTIVATION FAILED" .. detail
+    end
+    return "FAILSAFE TRIGGERED" .. at .. " - REACTOR DEACTIVATED"
+end
+
 local function buildReactorSummary(r)
     local lines = newLines()
     header(lines, "SALT FISSION REACTOR")
@@ -84,6 +94,7 @@ local function buildReactorSummary(r)
 
     add(lines, "Reactor: " .. (r.reactorOn and "ONLINE" or "OFFLINE"), r.reactorOn and GOOD or WARN)
     add(lines, "Structure: " .. (r.complete and "COMPLETE" or "INVALID"), r.complete and GOOD or BAD)
+    if r.failsafe and r.failsafe.triggered then add(lines, failsafeMessage(r.failsafe), BAD) end
 
     if r.size then
         add(lines, "Size: " .. n(r.size.x) .. " x " .. n(r.size.y) .. " x " .. n(r.size.z))
@@ -190,6 +201,7 @@ local function drawDashboard(response, err, status)
     drawAt(1, 3, "Reactor: " .. (r.reactorOn and "ONLINE" or "OFFLINE"), r.reactorOn and GOOD or WARN)
     drawAt(22, 3, "Structure: " .. (r.complete and "COMPLETE" or "INVALID"), r.complete and GOOD or BAD)
     if r.size then drawAt(45, 3, "Size " .. n(r.size.x) .. "x" .. n(r.size.y) .. "x" .. n(r.size.z), MUTED) end
+    if r.failsafe and r.failsafe.triggered then drawAt(1, 4, failsafeMessage(r.failsafe), BAD) end
 
     if r.heat then
         drawAt(1, 5, "HEAT", HEADER)

@@ -200,6 +200,7 @@ object Runner {
     val connectedRendered = new AtomicBoolean(false)
     val onlineRendered = new AtomicBoolean(false)
     val completeRendered = new AtomicBoolean(false)
+    val failsafeRendered = new AtomicBoolean(false)
     val discoveringRendered = new AtomicBoolean(false)
     val discoveryCountRendered = new AtomicBoolean(false)
     val requestingRendered = new AtomicBoolean(false)
@@ -214,6 +215,9 @@ object Runner {
         if (event.value.contains("CONNECTED")) connectedRendered.set(true)
         if (event.value.contains("ONLINE")) onlineRendered.set(true)
         if (event.value.contains("COMPLETE")) completeRendered.set(true)
+        if (event.value.contains("FAILSAFE TRIGGERED") || event.value.contains("DEACTIVATION FAILED")) {
+          failsafeRendered.set(true)
+        }
     }
 
     server.computer.machine.start()
@@ -240,7 +244,8 @@ object Runner {
 
     val resultPath = client.diskRoot.resolve(ResultFile)
     val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
-    def clientConnected: Boolean = connectedRendered.get() && onlineRendered.get() && completeRendered.get()
+    def clientConnected: Boolean = connectedRendered.get() && onlineRendered.get() && completeRendered.get() &&
+      failsafeRendered.get()
     while (!clientConnected && !resultReady(resultPath) && crash.get() == null && System.nanoTime() < deadline) {
       workspace.update()
       Thread.sleep(10)
@@ -489,6 +494,7 @@ object Runner {
     val discovering = new AtomicBoolean(false)
     val discoveryCounts = new AtomicBoolean(false)
     val reactor = new AtomicBoolean(false)
+    val reactorFailsafe = new AtomicBoolean(false)
     val heat = new AtomicBoolean(false)
     val turbine = new AtomicBoolean(false)
     val geiger = new AtomicBoolean(false)
@@ -516,14 +522,16 @@ object Runner {
     dashboard.computer.machine.start()
 
     val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
-    def complete: Boolean = discovering.get() && discoveryCounts.get() && reactor.get() && heat.get() &&
-      turbine.get() && geiger.get() && spinner.get() && granularStateColors.get() && radiationColors.get() &&
-      alignedColumns.get()
+    def complete: Boolean = discovering.get() && discoveryCounts.get() && reactor.get() && reactorFailsafe.get() &&
+      heat.get() && turbine.get() && geiger.get() && spinner.get() && granularStateColors.get() &&
+      radiationColors.get() && alignedColumns.get()
     while (!complete && crash.get() == null && System.nanoTime() < deadline) {
       workspace.update()
       val rendered = renderScreen(dashboard.screen)
       if (rendered.contains("7 services discovered")) discoveryCounts.set(true)
       if (rendered.contains("E2E Reactor") && rendered.contains("ONLINE") && rendered.contains("COMPLETE")) reactor.set(true)
+      if (rendered.contains("E2E Reactor") && rendered.contains("FAILSAFE FAILED") &&
+        textHasForeground(dashboard.screen, "FAILSAFE FAILED", 0xFF5555)) reactorFailsafe.set(true)
       if (rendered.contains("E2E Heat Exchanger") && rendered.contains("80.0%") &&
         rendered.contains("OFFLINE") && rendered.contains("INCOMPLETE")) heat.set(true)
       if (rendered.contains("E2E Turbine") && rendered.contains("12.3 kRF/t")) turbine.set(true)
@@ -564,7 +572,8 @@ object Runner {
     } else if (!complete) {
       throw new RuntimeException(
         s"Dashboard did not render the complete fleet (discovering=${discovering.get()}, " +
-          s"counts=${discoveryCounts.get()}, reactor=${reactor.get()}, heat=${heat.get()}, " +
+          s"counts=${discoveryCounts.get()}, reactor=${reactor.get()}, reactorFailsafe=${reactorFailsafe.get()}, " +
+          s"heat=${heat.get()}, " +
           s"turbine=${turbine.get()}, geiger=${geiger.get()}, spinner=${spinner.get()}, " +
           s"stateColors=${granularStateColors.get()}, radiationColors=${radiationColors.get()}, " +
           s"aligned=${alignedColumns.get()})\n$screens"

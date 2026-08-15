@@ -51,6 +51,9 @@ geiger-server.lua / geiger-client.lua
 
 reactor-server.lua / reactor-relay.lua / reactor-client.lua
 - Salt fission reactor + Geiger counter.
+- The server checks reactor heat every second and deactivates the reactor when
+  stored heat is rising above 50% capacity. Reactor responses retain the
+  trigger heat and whether deactivation succeeded so clients can raise an alert.
 - The server uses a Linked Card for the cross-dimensional link to the relay.
 - The relay serves clients over normal Network Cards / component.modem.
 - On first launch, the relay asks for a stable ID and display name, then saves

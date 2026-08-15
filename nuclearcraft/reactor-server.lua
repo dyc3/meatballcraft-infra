@@ -1,7 +1,10 @@
 local component = require("component")
+local event = require("event")
 local rpc = require("nuclearcraft.rpc")
 
 local PROTOCOL = "nc-reactor-v1"
+local HEAT_CHECK_INTERVAL = 1
+local HEAT_SHUTOFF_PERCENT = 50
 
 local tunnel = component.tunnel
 local reactor = component.nc_salt_fission_reactor
@@ -18,6 +21,35 @@ local function safeCall(fn)
     if not ok then return nil end
     return value
 end
+
+local function readHeat()
+    local stored = safeCall(reactor.getHeatStored)
+    local capacity = safeCall(reactor.getHeatCapacity)
+    if type(stored) ~= "number" or type(capacity) ~= "number" or capacity <= 0 then return nil end
+    return stored, stored / capacity * 100
+end
+
+local failsafe = { triggered = false }
+local previousHeat = readHeat()
+event.timer(HEAT_CHECK_INTERVAL, function()
+    local stored, percent = readHeat()
+    if stored and previousHeat and stored > previousHeat and percent > HEAT_SHUTOFF_PERCENT then
+        local ok, err = pcall(reactor.deactivate)
+        failsafe = {
+            triggered = true,
+            reason = "rising_heat",
+            heatPercent = percent,
+            deactivated = ok,
+            error = ok and nil or tostring(err)
+        }
+        if ok then
+            print(string.format("SAFETY: Reactor deactivated while heat was increasing at %.1f%%.", percent))
+        else
+            print("SAFETY: Failed to deactivate reactor: " .. tostring(err))
+        end
+    end
+    previousHeat = stored
+end, math.huge)
 
 local function simplifyVessel(v)
     local pos = v[1] or {}
@@ -72,6 +104,7 @@ local function getReactorData()
     return {
         complete = safeCall(reactor.isComplete),
         reactorOn = safeCall(reactor.isReactorOn),
+        failsafe = failsafe,
         size = {
             x = safeCall(reactor.getLengthX),
             y = safeCall(reactor.getLengthY),

@@ -11,6 +11,13 @@ rpc.tunnel(component.tunnel, "nc-reactor-v1").serve(function(requestType)
                 fixture = "real-three-computer-topology",
                 reactorOn = true,
                 complete = true,
+                failsafe = {
+                    triggered = true,
+                    reason = "rising_heat",
+                    heatPercent = 51,
+                    deactivated = false,
+                    error = "fixture actuator failure"
+                },
                 vessels = {}
             },
             radiation = { level = 0 }

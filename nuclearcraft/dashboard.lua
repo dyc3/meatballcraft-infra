@@ -133,6 +133,10 @@ local function reactorSummary(response)
     local vessels = reactor.counts and uiModule.number(reactor.counts.vessels) or
         (reactor.vessels and uiModule.number(#reactor.vessels) or "-")
     machineState(segments, reactor.reactorOn, reactor.complete)
+    if reactor.failsafe and reactor.failsafe.triggered then
+        separator(segments)
+        add(segments, reactor.failsafe.deactivated == false and "FAILSAFE FAILED" or "FAILSAFE", uiModule.BAD)
+    end
     separator(segments)
     add(segments, "Heat ", uiModule.MUTED)
     addField(segments, heat and uiModule.percentage(heat.percent) or "-", 7, heatColor(heat and heat.percent))
