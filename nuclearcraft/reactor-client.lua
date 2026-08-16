@@ -276,5 +276,11 @@ ui.runMenu(menuTitle, {
     { key = "3", label = "Radiation", action = function()
         showResponse("getRadiation", buildRadiation, "radiation")
     end },
-    { key = "4", label = "Live dashboard", action = dashboard }
+    { key = "4", label = "Live dashboard", action = dashboard },
+    { key = "5", label = "Activate reactor", action = function()
+        showResponse("activate", buildReactorSummary, "reactor")
+    end },
+    { key = "6", label = "Deactivate reactor", action = function()
+        showResponse("deactivate", buildReactorSummary, "reactor")
+    end }
 })

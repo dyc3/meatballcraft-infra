@@ -207,6 +207,7 @@ object Runner {
     val discoveringRendered = new AtomicBoolean(false)
     val discoveryCountRendered = new AtomicBoolean(false)
     val requestingRendered = new AtomicBoolean(false)
+    val controlFailureRendered = new AtomicBoolean(false)
     val roles = computers.map(node => node.computer.node.address -> node).toMap
     EventBus.subscribe {
       case event: MachineCrashEvent if roles.contains(event.address) =>
@@ -221,6 +222,9 @@ object Runner {
         if (event.value.contains("FAILSAFE TRIGGERED") || event.value.contains("DEACTIVATION FAILED")) {
           failsafeRendered.set(true)
         }
+        if (event.value.contains("Server error: Failed to activate reactor:")) {
+          controlFailureRendered.set(true)
+        }
     }
 
     server.computer.machine.start()
@@ -230,16 +234,48 @@ object Runner {
     client.computer.machine.start()
 
     val menuDeadline = System.nanoTime() + 10L * 1000000000L
-    while (!renderScreen(client.screen).contains("4. Live dashboard") && crash.get() == null &&
+    while (!renderScreen(client.screen).contains("6. Deactivate reactor") && crash.get() == null &&
       System.nanoTime() < menuDeadline) {
       workspace.update()
       Thread.sleep(10)
     }
-    if (!renderScreen(client.screen).contains("4. Live dashboard")) {
+    if (!renderScreen(client.screen).contains("6. Deactivate reactor")) {
       throw new RuntimeException(s"Reactor client did not reach its real menu\n${renderScreen(client.screen)}")
     }
 
     val user = User("e2e")
+    def choose(key: Char, code: Int): Unit = {
+      client.screen.keyDown(key, code, user)
+      client.screen.keyUp(key, code, user)
+      client.screen.keyDown('\r', 28, user)
+      client.screen.keyUp('\r', 28, user)
+    }
+    def waitForScreen(text: String, seconds: Long = 10): Unit = {
+      val screenDeadline = System.nanoTime() + seconds * 1000000000L
+      while (!renderScreen(client.screen).contains(text) && crash.get() == null &&
+        System.nanoTime() < screenDeadline) {
+        workspace.update()
+        Thread.sleep(10)
+      }
+      if (!renderScreen(client.screen).contains(text)) {
+        throw new RuntimeException(s"Reactor client did not render '$text'\n${renderScreen(client.screen)}")
+      }
+    }
+
+    choose('6', 7)
+    waitForScreen("Reactor: OFFLINE")
+    client.screen.keyDown('q', 16, user)
+    client.screen.keyUp('q', 16, user)
+    waitForScreen("6. Deactivate reactor")
+    choose('5', 6)
+    waitForScreen("Server error: Failed to activate reactor:")
+    pumpWorkspace(workspace, 1500)
+    choose('5', 6)
+    waitForScreen("Reactor: ONLINE")
+    client.screen.keyDown('q', 16, user)
+    client.screen.keyUp('q', 16, user)
+    waitForScreen("4. Live dashboard")
+
     client.screen.keyDown('4', 5, user)
     client.screen.keyUp('4', 5, user)
     client.screen.keyDown('\r', 28, user)
@@ -265,11 +301,12 @@ object Runner {
       throw new RuntimeException(s"Real reactor client exited:\n${result.stripPrefix("FAIL\n")}\n$screens")
     } else if (!clientConnected) {
       throw new RuntimeException(s"Real reactor client did not receive data after $TimeoutSeconds seconds\n$screens")
-    } else if (!discoveringRendered.get() || !discoveryCountRendered.get() || !requestingRendered.get()) {
+    } else if (!discoveringRendered.get() || !discoveryCountRendered.get() || !requestingRendered.get() ||
+      !controlFailureRendered.get()) {
       throw new RuntimeException(
         s"Real reactor client did not render discovery/request diagnostics " +
           s"(discovering=${discoveringRendered.get()}, count=${discoveryCountRendered.get()}, " +
-          s"requesting=${requestingRendered.get()})\n$screens"
+          s"requesting=${requestingRendered.get()}, controlFailure=${controlFailureRendered.get()})\n$screens"
       )
     }
 

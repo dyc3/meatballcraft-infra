@@ -64,6 +64,7 @@ reactor-server.lua / reactor-relay.lua / reactor-client.lua
   discovers named relays over a Network Card, selects from the current results,
   and sends subsequent RPC requests directly to that relay's modem address.
 - Pass --reactor=INSTANCE to the client to select a relay non-interactively.
+- The client can activate or deactivate the selected reactor from its main menu.
 - Port: 48723
 - Reactor server, relay, and client use the same correlated nc-reactor-v1 RPC
   envelope. Update all three packages together and reboot their computers after

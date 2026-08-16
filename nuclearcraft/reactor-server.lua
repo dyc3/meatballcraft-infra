@@ -136,6 +136,18 @@ local function getRadiationData()
     return { level = level }
 end
 
+local function setReactorActive(active)
+    local action = active and "activate" or "deactivate"
+    local ok, err = pcall(function()
+        if active then return reactor.activate() end
+        return reactor.deactivate()
+    end)
+    if not ok then
+        return { ok = false, error = "Failed to " .. action .. " reactor: " .. tostring(err) }
+    end
+    return { ok = true, reactor = getReactorData() }
+end
+
 local function buildResponse(requestType)
     if requestType == "getReactor" then
         return { ok = true, reactor = getReactorData() }
@@ -145,6 +157,10 @@ local function buildResponse(requestType)
         return { ok = true, radiation = getRadiationData() }
     elseif requestType == "getAll" then
         return { ok = true, reactor = getReactorData(), radiation = getRadiationData() }
+    elseif requestType == "activate" then
+        return setReactorActive(true)
+    elseif requestType == "deactivate" then
+        return setReactorActive(false)
     else
         return { ok = false, error = "Unknown request: " .. tostring(requestType) }
     end
