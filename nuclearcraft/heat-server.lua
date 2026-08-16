@@ -9,6 +9,7 @@ local PROTOCOL = "nc-heat-exchanger-v1"
 local SERVICE_TYPE = "meatballcraft.nc.heat-exchanger"
 local API_VERSION = 1
 local CONFIG_PATH = "/etc/nuclearcraft/heat-server.cfg"
+local TUBE_PAGE_SIZE = 12
 
 local args, options = shell.parse(...)
 
@@ -114,22 +115,6 @@ local function simplifyCondensationTube(raw)
     }
 end
 
-local function getExchangerTubes()
-    local raw = safeCall(exchanger.getExchangerTubeStats)
-    local result = {}
-    if type(raw) ~= "table" then return result end
-    for _, tube in ipairs(raw) do table.insert(result, simplifyExchangerTube(tube)) end
-    return result
-end
-
-local function getCondensationTubes()
-    local raw = safeCall(exchanger.getCondensationTubeStats)
-    local result = {}
-    if type(raw) ~= "table" then return result end
-    for _, tube in ipairs(raw) do table.insert(result, simplifyCondensationTube(tube)) end
-    return result
-end
-
 local function getSummary()
     return {
         complete = safeCall(exchanger.isComplete),
@@ -144,23 +129,36 @@ local function getSummary()
         counts = {
             exchanger = safeCall(exchanger.getNumberOfExchangerTubes),
             condensation = safeCall(exchanger.getNumberOfCondensationTubes)
-        },
-        exchangerTubes = getExchangerTubes(),
-        condensationTubes = getCondensationTubes()
+        }
+    }
+end
+
+local function page(values, offset, simplify)
+    if type(values) ~= "table" then values = {} end
+    offset = math.max(1, math.floor(tonumber(offset) or 1))
+    local result = {}
+    local last = math.min(#values, offset + TUBE_PAGE_SIZE - 1)
+    for index = offset, last do result[#result + 1] = simplify(values[index]) end
+    local nextOffset = last < #values and last + 1 or nil
+    return {
+        ok = true,
+        tubes = result,
+        offset = offset,
+        nextOffset = nextOffset,
+        total = #values
     }
 end
 
 local function buildResponse(requestType)
+    local pagedType, offset = tostring(requestType):match("^(get[%a]+):(%d+)$")
     if requestType == "getSummary" then
-        local summary = getSummary()
-        summary.exchangerTubes = nil
-        summary.condensationTubes = nil
-        return { ok = true, exchanger = summary }
-    elseif requestType == "getExchangerTubes" then
-        return { ok = true, tubes = getExchangerTubes() }
-    elseif requestType == "getCondensationTubes" then
-        return { ok = true, tubes = getCondensationTubes() }
+        return { ok = true, exchanger = getSummary() }
+    elseif requestType == "getExchangerTubes" or pagedType == "getExchangerTubes" then
+        return page(safeCall(exchanger.getExchangerTubeStats), offset, simplifyExchangerTube)
+    elseif requestType == "getCondensationTubes" or pagedType == "getCondensationTubes" then
+        return page(safeCall(exchanger.getCondensationTubeStats), offset, simplifyCondensationTube)
     elseif requestType == "getAll" then
+        -- Keep this legacy request bounded for older dashboards and clients.
         return { ok = true, exchanger = getSummary() }
     else
         return { ok = false, error = "Unknown request: " .. tostring(requestType) }

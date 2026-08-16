@@ -73,6 +73,9 @@ reactor-server.lua / reactor-relay.lua / reactor-client.lua
 
 heat-server.lua / heat-client.lua
 - NuclearCraft heat exchanger.
+- Summary dashboards use bounded aggregate responses. Detailed exchanger and
+  condensation tube views are fetched in pages to stay within Network Card
+  packet limits.
 - Uses normal OpenComputers Network Cards / component.modem.
 - On first launch, the server asks for a stable ID and display name, then saves
   them in /etc/nuclearcraft/heat-server.cfg.

@@ -1,5 +1,16 @@
 local realComponent = require("component")
 
+local exchangerTubes = {}
+local condensationTubes = {}
+for index = 1, 64 do
+    exchangerTubes[index] = {
+        { index, 2, 3 }, 1.1, true, 10, 20, 1.25, 300, 315, "EAST"
+    }
+    condensationTubes[index] = {
+        { index, 2, 4 }, 0.9, true, 10, 40, 1.1, 373, { 300, 301, 302, 303, 304, 305 }
+    }
+end
+
 local values = {
     isComplete = false,
     isHeatExchangerOn = false,
@@ -8,10 +19,10 @@ local values = {
     getLengthZ = 5,
     getFractionOfTubesActive = 0.5,
     getMeanEfficiency = 0.8,
-    getNumberOfExchangerTubes = 1,
-    getNumberOfCondensationTubes = 1,
-    getExchangerTubeStats = {},
-    getCondensationTubeStats = {}
+    getNumberOfExchangerTubes = #exchangerTubes,
+    getNumberOfCondensationTubes = #condensationTubes,
+    getExchangerTubeStats = exchangerTubes,
+    getCondensationTubeStats = condensationTubes
 }
 
 local exchanger = setmetatable({}, {

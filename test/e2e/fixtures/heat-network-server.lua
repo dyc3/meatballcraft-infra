@@ -44,15 +44,19 @@ local exchanger = {
 }
 
 rpc.modem(modem, port, "nc-heat-exchanger-v1").serve(function(requestType)
-    if requestType == "getAll" then return { ok = true, exchanger = exchanger } end
+    if requestType == "getAll" then return { ok = false, error = "getAll must not be used by the live dashboard" } end
     if requestType == "getSummary" then
         local summary = {}
         for key, value in pairs(exchanger) do
-            if key ~= "tubes" and key ~= "networks" then summary[key] = value end
+            if key ~= "exchangerTubes" and key ~= "condensationTubes" then summary[key] = value end
         end
         return { ok = true, exchanger = summary }
     end
-    if requestType == "getExchangerTubes" then return { ok = true, tubes = exchanger.exchangerTubes } end
-    if requestType == "getCondensationTubes" then return { ok = true, tubes = exchanger.condensationTubes } end
+    if requestType == "getExchangerTubes:1" then
+        return { ok = true, tubes = exchanger.exchangerTubes, offset = 1, total = 1 }
+    end
+    if requestType == "getCondensationTubes:1" then
+        return { ok = true, tubes = exchanger.condensationTubes, offset = 1, total = 1 }
+    end
     return { ok = false, error = "Unknown request: " .. tostring(requestType) }
 end)

@@ -29,7 +29,7 @@ local TYPES = {
         singular = "heat exchanger",
         serviceType = "meatballcraft.nc.heat-exchanger",
         protocol = "nc-heat-exchanger-v1",
-        requestType = "getAll",
+        requestType = "getSummary",
         responseField = "exchanger"
     },
     {

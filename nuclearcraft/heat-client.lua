@@ -64,6 +64,29 @@ local add = ui.add
 local blank = ui.blank
 local header = ui.header
 
+local function requestTubePages(requestType)
+    local tubes = {}
+    local offset = 1
+
+    while offset do
+        local response, err = request(requestType .. ":" .. tostring(offset))
+        if not response then return nil, err end
+        if not response.ok or type(response.tubes) ~= "table" then return response end
+        for _, tube in ipairs(response.tubes) do tubes[#tubes + 1] = tube end
+
+        local nextOffset = response.nextOffset
+        if nextOffset == nil then
+            offset = nil
+        elseif type(nextOffset) ~= "number" or nextOffset <= offset then
+            return nil, "Server returned invalid tube pagination metadata"
+        else
+            offset = nextOffset
+        end
+    end
+
+    return { ok = true, tubes = tubes }
+end
+
 local function buildSummary(e)
     local lines = newLines()
     header(lines, "HEAT EXCHANGER")
@@ -163,46 +186,11 @@ local function drawDashboard(response, err, status)
     if e.counts then drawAt(1, 6,
             "Exchanger tubes: " .. n(e.counts.exchanger) .. "   Condensers: " .. n(e.counts.condensation)) end
 
-    local y = 8
-    drawAt(1, y, "EXCHANGER TUBES", HEADER)
-    y = y + 1
-    drawAt(1, y, "#  POS          STATE  PROG   TICKS   SPEED    TEMP", MUTED)
-    y = y + 1
-
-    for i, t in ipairs(e.exchangerTubes or {}) do
-        if y >= height - 3 then break end
-        local p = t.process or {}
-        local temp = t.temperature or {}
-        local row = string.format("%-2d %-12s %-5s %-6s %-7s x%-7s %s>%s", i, pos(t.position),
-            t.processing and "RUN" or "IDLE", pct(p.progressPercent), n(p.processTime, 1), n(p.speedMultiplier, 1),
-            n(temp.input), n(temp.output))
-        drawAt(1, y, row, t.processing and GOOD or MUTED)
-        y = y + 1
-    end
-
-    if y < height - 2 then
-        y = y + 1
-        drawAt(1, y, "CONDENSATION TUBES", HEADER)
-        y = y + 1
-        drawAt(1, y, "#  POS          STATE  PROG   TICKS   SPEED    COND TEMP", MUTED)
-        y = y + 1
-
-        for i, t in ipairs(e.condensationTubes or {}) do
-            if y >= height then break end
-            local p = t.process or {}
-            local row = string.format("%-2d %-12s %-5s %-6s %-7s x%-7s %s K", i, pos(t.position),
-                t.processing and "RUN" or "IDLE", pct(p.progressPercent), n(p.processTime, 1), n(p.speedMultiplier, 1),
-                n(t.condensingTemperature))
-            drawAt(1, y, row, t.processing and GOOD or MUTED)
-            y = y + 1
-        end
-    end
-
     drawAt(1, height, "Refresh " .. REFRESH_INTERVAL .. "s   q=back   r=refresh", MUTED)
 end
 
 local function dashboard()
-    ui.runDashboard(REFRESH_INTERVAL, function() return request("getAll") end, drawDashboard, "exchanger")
+    ui.runDashboard(REFRESH_INTERVAL, function() return request("getSummary") end, drawDashboard, "exchanger")
 end
 
 ui.runMenu("NC Heat Exchanger - " .. selectedService.displayName .. string.format(" [%d discovered]", #services), {
@@ -210,10 +198,10 @@ ui.runMenu("NC Heat Exchanger - " .. selectedService.displayName .. string.forma
         ui.showResponse(request, "getSummary", buildSummary, "exchanger")
     end },
     { key = "2", label = "Exchanger tubes", action = function()
-        ui.showResponse(request, "getExchangerTubes", buildExchangerTubes, "tubes")
+        ui.showResponse(requestTubePages, "getExchangerTubes", buildExchangerTubes, "tubes")
     end },
     { key = "3", label = "Condensation tubes", action = function()
-        ui.showResponse(request, "getCondensationTubes", buildCondensationTubes, "tubes")
+        ui.showResponse(requestTubePages, "getCondensationTubes", buildCondensationTubes, "tubes")
     end },
     { key = "4", label = "Live dashboard", action = dashboard }
 })

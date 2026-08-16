@@ -128,11 +128,24 @@ local function runServer(program, hasTunnel, serviceType, port)
     local selectedTransport
     local modem = { open = function(openedPort) assert(openedPort == port) return true end }
 
+    local heatTubes = {}
+    local condensationTubes = {}
+    for index = 1, 25 do
+        heatTubes[index] = { { index, 2, 3 }, 1.1, true, 10, 20, 1.25, 300, 315, "EAST" }
+        condensationTubes[index] = {
+            { index, 2, 4 }, 0.9, true, 10, 40, 1.1, 373, { 300, 301, 302, 303, 304, 305 }
+        }
+    end
+    local heatExchanger = {
+        getExchangerTubeStats = function() return heatTubes end,
+        getCondensationTubeStats = function() return condensationTubes end
+    }
+
     package.loaded.component = {
         modem = hasTunnel and nil or modem,
         tunnel = hasTunnel and {} or nil,
         nc_geiger_counter = program == "geiger-server.lua" and {} or nil,
-        nc_heat_exchanger = program == "heat-server.lua" and {} or nil,
+        nc_heat_exchanger = program == "heat-server.lua" and heatExchanger or nil,
         nc_turbine = program == "turbine-server.lua" and {} or nil,
         isAvailable = function(name)
             return name == "nc_geiger_counter" or name == "nc_heat_exchanger" or name == "nc_turbine" or
@@ -161,7 +174,32 @@ local function runServer(program, hasTunnel, serviceType, port)
         modem = function(receivedModem, receivedPort)
             assert(receivedModem == modem and receivedPort == port)
             selectedTransport = "modem"
-            return { serve = function() error(COMPLETE) end }
+            return { serve = function(handler)
+                if program == "heat-server.lua" then
+                    local legacy = handler("getAll")
+                    assert(legacy.ok and legacy.exchanger and not legacy.exchanger.exchangerTubes,
+                        "legacy getAll response still included unbounded tube data")
+
+                    local first = handler("getExchangerTubes:1")
+                    local second = handler("getExchangerTubes:" .. tostring(first.nextOffset))
+                    local third = handler("getExchangerTubes:" .. tostring(second.nextOffset))
+                    local legacyTubes = handler("getExchangerTubes")
+                    local condensation = handler("getCondensationTubes:1")
+                    assert(#first.tubes == 12 and first.offset == 1 and first.nextOffset == 13 and first.total == 25,
+                        "first exchanger tube page was not bounded correctly")
+                    assert(#second.tubes == 12 and second.offset == 13 and second.nextOffset == 25,
+                        "second exchanger tube page was not bounded correctly")
+                    assert(#third.tubes == 1 and third.offset == 25 and third.nextOffset == nil,
+                        "final exchanger tube page was not bounded correctly")
+                    assert(#legacyTubes.tubes == 12 and legacyTubes.nextOffset == 13,
+                        "legacy tube request was not bounded to one page")
+                    assert(#condensation.tubes == 12 and condensation.nextOffset == 13,
+                        "condensation tube page was not bounded correctly")
+                    assert(#serialization.serialize(first) < 8000 and #serialization.serialize(condensation) < 8000,
+                        "tube page left insufficient room in an 8192-byte network packet")
+                end
+                error(COMPLETE)
+            end }
         end
     }
 
@@ -189,6 +227,18 @@ local function runClient(program, hasTunnel, serviceType, port)
     local selectedAddress
     local selectedPort
     local openedPort
+    local requestedPages = {}
+    local function request(requestType)
+        if program ~= "heat-client.lua" then return nil end
+        local offset = tonumber(tostring(requestType):match("^getExchangerTubes:(%d+)$"))
+        assert(offset, "heat client sent an unpaged tube request: " .. tostring(requestType))
+        requestedPages[#requestedPages + 1] = offset
+        local count = math.min(12, 25 - offset + 1)
+        local tubes = {}
+        for index = 1, count do tubes[index] = { position = { x = offset + index - 1 } } end
+        local nextOffset = offset + count <= 25 and offset + count or nil
+        return { ok = true, tubes = tubes, offset = offset, nextOffset = nextOffset, total = 25 }
+    end
     local modem = {
         open = function(value) openedPort = value return true end,
         isOpen = function(value) return openedPort == value end
@@ -231,18 +281,36 @@ local function runClient(program, hasTunnel, serviceType, port)
     package.loaded["nuclearcraft.rpc"] = {
         tunnel = function()
             selectedTransport = "tunnel"
-            return { request = function() end }
+            return { request = request }
         end,
         modemUnicast = function(receivedModem, address, receivedPort)
             assert(receivedModem == modem)
             selectedTransport = "modem"
             selectedAddress = address
             selectedPort = receivedPort
-            return { request = function() end }
+            return { request = request }
         end
     }
     package.loaded["nuclearcraft.ui"] = {
         new = function()
+            if program == "heat-client.lua" then
+                local screen = {}
+                function screen.runMenu(_, entries)
+                    for _, entry in ipairs(entries) do
+                        if entry.key == "2" then return entry.action() end
+                    end
+                    error("heat client menu omitted exchanger tube details")
+                end
+                function screen.showResponse(requester, requestType)
+                    local response, err = requester(requestType)
+                    assert(response and not err and response.ok and #response.tubes == 25,
+                        "heat client did not combine every tube page")
+                    assert(#requestedPages == 3 and requestedPages[1] == 1 and requestedPages[2] == 13 and
+                        requestedPages[3] == 25, "heat client requested incorrect tube page offsets")
+                    error(COMPLETE)
+                end
+                return screen
+            end
             return {
                 runMenu = function() error(COMPLETE) end,
                 runDashboard = function() error(COMPLETE) end
