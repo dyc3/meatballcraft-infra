@@ -333,6 +333,8 @@ object Runner {
     val requesting = new AtomicBoolean(false)
     val connected = new AtomicBoolean(false)
     val heatData = new AtomicBoolean(false)
+    val exchangerTubeData = new AtomicBoolean(false)
+    val condensationTubeData = new AtomicBoolean(false)
     val roles = computers.map(node => node.computer.node.address -> node).toMap
 
     EventBus.subscribe {
@@ -343,6 +345,8 @@ object Runner {
         if (event.value.contains("REQUESTING") || event.value.contains("Request sent")) requesting.set(true)
         if (event.value.contains("CONNECTED")) connected.set(true)
         if (event.value.contains("Efficiency")) heatData.set(true)
+        if (event.value.contains("300>315")) exchangerTubeData.set(true)
+        if (event.value.contains("373 K")) condensationTubeData.set(true)
     }
 
     server.computer.machine.start()
@@ -365,7 +369,8 @@ object Runner {
     client.screen.keyUp('\r', 28, user)
 
     val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
-    while (!(discovered.get() && requesting.get() && connected.get() && heatData.get()) && crash.get() == null &&
+    while (!(discovered.get() && requesting.get() && connected.get() && heatData.get() && exchangerTubeData.get() &&
+      condensationTubeData.get()) && crash.get() == null &&
       System.nanoTime() < deadline) {
       workspace.update()
       Thread.sleep(10)
@@ -376,10 +381,12 @@ object Runner {
 
     if (crash.get() != null) {
       throw new RuntimeException(s"Heat topology crashed: ${crash.get()}\n$screens")
-    } else if (!(discovered.get() && requesting.get() && connected.get() && heatData.get())) {
+    } else if (!(discovered.get() && requesting.get() && connected.get() && heatData.get() &&
+      exchangerTubeData.get() && condensationTubeData.get())) {
       throw new RuntimeException(
         s"Heat RPC diagnostics/data incomplete (discovered=${discovered.get()}, requesting=${requesting.get()}, " +
-          s"connected=${connected.get()}, data=${heatData.get()})\n$screens"
+          s"connected=${connected.get()}, data=${heatData.get()}, exchangerTubes=${exchangerTubeData.get()}, " +
+          s"condensationTubes=${condensationTubeData.get()})\n$screens"
       )
     }
     println(s"PASS: $HeatNetworkProgram (real 2-computer wireless discovery + heat RPC topology)")
