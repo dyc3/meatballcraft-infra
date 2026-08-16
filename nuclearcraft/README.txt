@@ -46,8 +46,8 @@ geiger-server.lua / geiger-client.lua
 - CLI values override and update the saved configuration, for example:
     geiger-server --id=geiger-north --name="North Geiger Counter"
 - Pass --geiger=INSTANCE to the client for non-interactive selection.
-- Displays chunk radiation in Rads/t with SI prefixes.
-- Client has a compact reading view and a live auto-refresh dashboard.
+- Opens directly into a live auto-refresh dashboard and displays chunk radiation
+  in Rads/t with SI prefixes and the same severity colors as the fleet dashboard.
 
 reactor-server.lua / reactor-relay.lua / reactor-client.lua
 - Salt fission reactor + Geiger counter.

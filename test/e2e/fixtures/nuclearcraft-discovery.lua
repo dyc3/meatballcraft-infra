@@ -242,7 +242,12 @@ local function runClient(program, hasTunnel, serviceType, port)
         end
     }
     package.loaded["nuclearcraft.ui"] = {
-        new = function() return { runMenu = function() error(COMPLETE) end } end
+        new = function()
+            return {
+                runMenu = function() error(COMPLETE) end,
+                runDashboard = function() error(COMPLETE) end
+            }
+        end
     }
 
     local chunk = assert(loadfile(mount .. "/repo/nuclearcraft/" .. program))

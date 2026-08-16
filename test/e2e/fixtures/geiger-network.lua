@@ -1,0 +1,2 @@
+-- Marker fixture handled by the Scala runner.
+-- It boots the real Geiger client and server on separate wireless computers.

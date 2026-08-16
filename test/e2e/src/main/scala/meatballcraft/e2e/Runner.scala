@@ -20,6 +20,7 @@ object Runner {
   private val ReactorNetworkProgram = "test/e2e/fixtures/reactor-network.lua"
   private val HeatNetworkProgram = "test/e2e/fixtures/heat-network.lua"
   private val TurbineNetworkProgram = "test/e2e/fixtures/turbine-network.lua"
+  private val GeigerNetworkProgram = "test/e2e/fixtures/geiger-network.lua"
   private val DashboardNetworkProgram = "test/e2e/fixtures/dashboard-network.lua"
 
   def main(args: Array[String]): Unit = {
@@ -46,6 +47,8 @@ object Runner {
         runHeatNetwork(root, workspaceRoot, temporaryRoot)
       } else if (requestedProgram == TurbineNetworkProgram) {
         runTurbineNetwork(root, workspaceRoot, temporaryRoot)
+      } else if (requestedProgram == GeigerNetworkProgram) {
+        runGeigerNetwork(root, workspaceRoot, temporaryRoot)
       } else if (requestedProgram == DashboardNetworkProgram) {
         runDashboardNetwork(root, workspaceRoot, temporaryRoot)
       } else {
@@ -380,6 +383,73 @@ object Runner {
       )
     }
     println(s"PASS: $HeatNetworkProgram (real 2-computer wireless discovery + heat RPC topology)")
+  }
+
+  private def runGeigerNetwork(root: Path, workspaceRoot: Path, temporaryRoot: Path): Unit = {
+    val workspace = new Workspace(workspaceRoot)
+    val server = createTopologyComputer(root, temporaryRoot, workspace, "geiger-server",
+      "test/e2e/fixtures/geiger-network-server.lua", Seq.empty, wireless = true, None)
+    val client = createTopologyComputer(root, temporaryRoot, workspace, "geiger-client",
+      "nuclearcraft/geiger-client.lua", Seq("--geiger=geiger-e2e"), wireless = true, None)
+    val computers = Seq(server, client)
+    val crash = new AtomicReference[String]()
+    val discovered = new AtomicBoolean(false)
+    val requesting = new AtomicBoolean(false)
+    val connected = new AtomicBoolean(false)
+    val menuRendered = new AtomicBoolean(false)
+    val roles = computers.map(node => node.computer.node.address -> node).toMap
+
+    EventBus.subscribe {
+      case event: MachineCrashEvent if roles.contains(event.address) =>
+        crash.compareAndSet(null, s"${roles(event.address).diskRoot.getFileName}: ${event.message}")
+      case event: TextBufferSetEvent if event.address == client.screen.node.address =>
+        if (event.value.contains("[1 discovered]")) discovered.set(true)
+        if (event.value.contains("REQUESTING") || event.value.contains("Request sent")) requesting.set(true)
+        if (event.value.contains("CONNECTED")) connected.set(true)
+        if (event.value.contains("Current radiation") || event.value.contains("Live dashboard")) menuRendered.set(true)
+    }
+
+    server.computer.machine.start()
+    pumpWorkspace(workspace, 2500)
+    client.computer.machine.start()
+
+    val nano = new AtomicBoolean(false)
+    val micro = new AtomicBoolean(false)
+    val milli = new AtomicBoolean(false)
+    val whole = new AtomicBoolean(false)
+    val deadline = System.nanoTime() + TimeoutSeconds * 1000000000L
+    def complete: Boolean = discovered.get() && requesting.get() && connected.get() && nano.get() && micro.get() &&
+      milli.get() && whole.get()
+    while (!complete && crash.get() == null && System.nanoTime() < deadline) {
+      workspace.update()
+      val rendered = renderScreen(client.screen)
+      if (rendered.contains("42.0 nRads/t") &&
+        textHasForeground(client.screen, "42.0 nRads/t", 0xFFFFFF)) nano.set(true)
+      if (rendered.contains("420 uRads/t") &&
+        textHasForeground(client.screen, "420 uRads/t", 0xFFFF55)) micro.set(true)
+      if (rendered.contains("420 mRads/t") &&
+        textHasForeground(client.screen, "420 mRads/t", 0xFFAA00)) milli.set(true)
+      if (rendered.contains("1.20 Rads/t") &&
+        textHasForeground(client.screen, "1.20 Rads/t", 0xFF5555)) whole.set(true)
+      Thread.sleep(10)
+    }
+
+    val screens = computers.zip(Seq("server", "client"))
+      .map { case (node, role) => s"$role ${renderScreen(node.screen)}" }.mkString("\n")
+    computers.foreach(_.computer.machine.stop())
+
+    if (crash.get() != null) {
+      throw new RuntimeException(s"Geiger topology crashed: ${crash.get()}\n$screens")
+    } else if (menuRendered.get()) {
+      throw new RuntimeException(s"Geiger client rendered its removed request menu\n$screens")
+    } else if (!complete) {
+      throw new RuntimeException(
+        s"Geiger diagnostics/colors incomplete (discovered=${discovered.get()}, requesting=${requesting.get()}, " +
+          s"connected=${connected.get()}, nano=${nano.get()}, micro=${micro.get()}, milli=${milli.get()}, " +
+          s"whole=${whole.get()})\n$screens"
+      )
+    }
+    println(s"PASS: $GeigerNetworkProgram (direct live dashboard with radiation severity colors)")
   }
 
   private def runTurbineNetwork(root: Path, workspaceRoot: Path, temporaryRoot: Path): Unit = {
