@@ -104,7 +104,7 @@ local function getSummary()
             z = safeCall(turbine.getLengthZ)
         },
         energy = { stored = energyStored, capacity = energyCapacity, percent = energyPercent },
-        power = safeCall(turbine.getRawPower),
+        power = safeCall(turbine.getPower),
         inputRate = safeCall(turbine.getInputRate),
         flowDirection = safeCall(turbine.getFlowDirection),
         coilConductivity = safeCall(turbine.getCoilConductivity),
