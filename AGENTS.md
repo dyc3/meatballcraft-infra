@@ -13,3 +13,6 @@ This repository is an OpenPrograms Package Manager (OPPM) source for Lua program
 - End-to-end tests must cover user-visible failure paths as well as success, including zero discovered services, timeouts, malformed responses, and server handler failures when relevant. Assert the diagnostic text rendered to the user and ensure expected operational errors exit cleanly without stack traces.
 - When a Minecraft component cannot be emulated, keep the real networking and program entry points in the topology and substitute only that component boundary. Component fixtures must match the documented mod API and should reject unknown methods so API-name mistakes fail tests.
 - Treat `test/ocelot-brain` as vendored upstream code: do not edit it for repository features.
+
+
+When a change crosses subsystem boundaries, verification must exercise the complete production-shaped path from the user-facing entry point to the observable result, using the real defaults and adapters. A test that manually constructs an intermediate artifact does not verify the subsystem responsible for producing that artifact. Do not claim end-to-end coverage unless one test traverses every boundary involved in the claim. If any boundary must be substituted, identify it explicitly and separately verify that the substitute matches the real contract.
