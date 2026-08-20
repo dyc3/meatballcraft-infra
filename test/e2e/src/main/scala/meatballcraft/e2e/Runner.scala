@@ -22,6 +22,7 @@ object Runner {
   private val TurbineNetworkProgram = "test/e2e/fixtures/turbine-network.lua"
   private val GeigerNetworkProgram = "test/e2e/fixtures/geiger-network.lua"
   private val DashboardNetworkProgram = "test/e2e/fixtures/dashboard-network.lua"
+  private val RcServicesProgram = "test/e2e/fixtures/rc-services.lua"
 
   def main(args: Array[String]): Unit = {
     val root = requiredEnvironmentPath("OC_E2E_ROOT")
@@ -52,7 +53,7 @@ object Runner {
       } else if (requestedProgram == DashboardNetworkProgram) {
         runDashboardNetwork(root, workspaceRoot, temporaryRoot)
       } else {
-        if (requestedProgram == "test/e2e/fixtures/package-install.lua") {
+        if (requestedProgram == "test/e2e/fixtures/package-install.lua" || requestedProgram == RcServicesProgram) {
           copyTree(
             root.resolve("test/ocelot-brain/src/main/resources/assets/opencomputers/loot/openos"),
             diskRoot
@@ -77,6 +78,9 @@ object Runner {
           )
         }
         stageRepository(root, diskRoot)
+        if (requestedProgram == RcServicesProgram) {
+          stageRcServices(root, diskRoot)
+        }
         if (requestedProgram == "test/e2e/fixtures/package-install.lua") {
           val stagedOppm = diskRoot.resolve("repo/test/e2e/fixtures/oppm-under-test.lua")
           Files.createDirectories(stagedOppm.getParent)
@@ -844,7 +848,7 @@ object Runner {
       computer.inventory(8) = new InternetCard()
 
       eeprom.volatileData = testDisk.node.address.getBytes(StandardCharsets.UTF_8)
-    } else if (program == "test/e2e/fixtures/package-install.lua") {
+    } else if (program == "test/e2e/fixtures/package-install.lua" || program == RcServicesProgram) {
       eeprom.volatileData = testDisk.node.address.getBytes(StandardCharsets.UTF_8)
     }
 
@@ -878,6 +882,46 @@ object Runner {
     }
 
     println(s"PASS: $program (Ocelot ${Ocelot.Version}, OpenOS 1.8.9)")
+  }
+
+  private def stageRcServices(root: Path, diskRoot: Path): Unit = {
+    val services = Seq(
+      "nc-geiger-server" -> "geiger-server.lua",
+      "nc-heat-server" -> "heat-server.lua",
+      "nc-reactor-relay" -> "reactor-relay.lua",
+      "nc-reactor-server" -> "reactor-server.lua",
+      "nc-turbine-server" -> "turbine-server.lua"
+    )
+
+    Files.createDirectories(diskRoot.resolve("etc/rc.d"))
+    Files.createDirectories(diskRoot.resolve("usr/bin"))
+    services.foreach { case (service, executable) =>
+      Files.copy(
+        root.resolve(s"nuclearcraft/rc.d/$service.lua"),
+        diskRoot.resolve(s"etc/rc.d/$service.lua")
+      )
+      Files.writeString(
+        diskRoot.resolve(s"usr/bin/$executable"),
+        s"""local event = require("event")
+           |local path = "/tmp/$service.starts"
+           |local input = io.open(path, "r")
+           |local count = input and tonumber(input:read("*a")) or 0
+           |if input then input:close() end
+           |local output = assert(io.open(path, "w"))
+           |output:write(tostring(count + 1))
+           |output:close()
+           |event.pull("rc_fixture_exit")
+           |""".stripMargin,
+        StandardCharsets.UTF_8
+      )
+    }
+
+    val enabled = services.map { case (service, _) => s"\"$service\"" }.mkString(", ")
+    Files.writeString(
+      diskRoot.resolve("etc/rc.cfg"),
+      s"enabled = {$enabled}\n",
+      StandardCharsets.UTF_8
+    )
   }
 
   private def stageRepository(root: Path, diskRoot: Path): Unit = {

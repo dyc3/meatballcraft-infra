@@ -9,11 +9,15 @@ setup:
     git submodule update --init --recursive
 
 # Run the complete test suite.
-test: e2e e2e-package-install e2e-service-discovery e2e-nuclearcraft-discovery e2e-reactor-network e2e-heat-network e2e-turbine-network e2e-geiger-network e2e-dashboard-network e2e-reactor-relay e2e-reactor-safety e2e-provision-drive
+test: e2e e2e-package-install e2e-rc-services e2e-service-discovery e2e-nuclearcraft-discovery e2e-reactor-network e2e-heat-network e2e-turbine-network e2e-geiger-network e2e-dashboard-network e2e-reactor-relay e2e-reactor-safety e2e-provision-drive
 
 # Build and launch an OPPM-shaped package using only its manifest files.
 e2e-package-install:
     ./test/e2e/run test/e2e/fixtures/package-install.lua
+
+# Boot every packaged rc service and verify start, stop, and restart behavior.
+e2e-rc-services:
+    ./test/e2e/run test/e2e/fixtures/rc-services.lua
 
 # Verify broadcast discovery, offer validation, conflicts, and port ownership.
 e2e-service-discovery:

@@ -90,6 +90,7 @@ end
 
 oppmInstall("nc-reactor-client")
 oppmInstall("nc-dashboard")
+oppmInstall("nc-reactor-server")
 
 stateFile = assert(io.open("/etc/opdata.svd", "r"))
 local installedPackages = assert(serialization.unserialize(stateFile:read("*a")))
@@ -100,15 +101,38 @@ assert(installedPackages["nc-common"], "OPPM did not install nc-common dependenc
 assert(installedPackages["meatball-discovery"], "OPPM did not install discovery dependency")
 assert(installedPackages["nc-common"]["master/nuclearcraft/lib/nuclearcraft/rpc.lua"] ==
     installRoot .. "/lib/nuclearcraft/rpc.lua", "nc-common does not own rpc.lua")
+assert(installedPackages["nc-common"]["master/nuclearcraft/lib/nuclearcraft/daemon.lua"] ==
+    installRoot .. "/lib/nuclearcraft/daemon.lua", "nc-common does not own daemon.lua")
 assert(not installedPackages["nc-reactor-client"]["master/nuclearcraft/lib/nuclearcraft/rpc.lua"],
     "reactor client still owns rpc.lua")
 assert(not installedPackages["nc-dashboard"]["master/nuclearcraft/lib/nuclearcraft/rpc.lua"],
     "dashboard still owns rpc.lua")
 
+for _, service in ipairs({
+    "nc-geiger-server",
+    "nc-heat-server",
+    "nc-reactor-relay",
+    "nc-reactor-server",
+    "nc-turbine-server"
+}) do
+    local source = "master/nuclearcraft/rc.d/" .. service .. ".lua"
+    assert(manifest[service].files[source] == "//etc/rc.d",
+        service .. " does not install its rc script under /etc/rc.d")
+end
+assert(installedPackages["nc-reactor-server"], "OPPM did not record nc-reactor-server")
+assert(installedPackages["nc-reactor-server"]["master/nuclearcraft/rc.d/nc-reactor-server.lua"] ==
+    "/etc/rc.d/nc-reactor-server.lua", "OPPM did not install the reactor server rc script")
+
 local systemPath = "/lib/?.lua;/usr/lib/?.lua;/lib/?/init.lua;/usr/lib/?/init.lua"
 package.path = installRoot .. "/lib/?.lua;" .. installRoot .. "/lib/?/init.lua;" .. systemPath
 
-for _, moduleName in ipairs({ "meatball.discovery", "nuclearcraft.rpc", "nuclearcraft.service", "nuclearcraft.ui" }) do
+for _, moduleName in ipairs({
+    "meatball.discovery",
+    "nuclearcraft.daemon",
+    "nuclearcraft.rpc",
+    "nuclearcraft.service",
+    "nuclearcraft.ui"
+}) do
     local path = assert(package.searchpath(moduleName, package.path), "installed package is missing " .. moduleName)
     assert(path:sub(1, #installRoot) == installRoot, moduleName .. " leaked in from the repository test environment")
 end

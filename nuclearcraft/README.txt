@@ -12,6 +12,17 @@ Shared libraries
   dependency packages. Executable packages do not duplicate ownership of files
   under /lib.
 
+Starting servers at boot
+- Server packages and nc-reactor-relay install OpenOS services under /etc/rc.d.
+- Network services need a saved identity before unattended startup. Run the
+  executable once to configure it, stop it, then enable its service. For example:
+    heat-server
+    rc nc-heat-server enable
+- The available services are nc-geiger-server, nc-heat-server,
+  nc-reactor-server, nc-reactor-relay, and nc-turbine-server.
+- Use `rc SERVICE start`, `rc SERVICE stop`, or `rc SERVICE status` to manage a
+  service without rebooting. Use `rc SERVICE disable` to remove it from boot.
+
 Package ownership migration
 - Packages installed before nc-common was introduced recorded shared /lib files
   as their own. OPPM cannot transfer that ownership during an update.
